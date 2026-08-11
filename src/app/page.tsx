@@ -44,6 +44,31 @@ export default function Home() {
   const [tradeHistory, setTradeHistory] = useState<TradeHistoryItem[]>([]);
   const [notification, setNotification] = useState<string | null>(null);
 
+  // Load persistent credentials from browser localStorage on boot
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const alpacaKey = localStorage.getItem('aitrader_alpaca_api_key');
+      const alpacaSecret = localStorage.getItem('aitrader_alpaca_secret_key');
+      const aiProvider = localStorage.getItem('aitrader_ai_provider') as any;
+      const aiKey = localStorage.getItem('aitrader_ai_api_key');
+
+      if (alpacaKey && alpacaSecret) {
+        alpacaBrokerClient.setCredentials({
+          apiKeyId: alpacaKey,
+          secretKey: alpacaSecret,
+          isPaper: true,
+        });
+      }
+
+      if (aiProvider || aiKey) {
+        aiProviderManager.setConfig({
+          provider: aiProvider || 'mock',
+          apiKey: aiKey || undefined,
+        });
+      }
+    }
+  }, []);
+
   // Market Engine & Alpaca Live Loop
   useEffect(() => {
     const updateMarket = async () => {
@@ -371,6 +396,7 @@ export default function Home() {
             riskCheck={riskCheck}
             portfolio={portfolio}
             onExecuteTrade={handleExecutePaperTrade}
+            onNavigateSettings={() => setActiveTab('settings')}
           />
         )}
 

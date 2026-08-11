@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Settings, Shield, Cpu, Check, Download, Wifi, Key, Database } from 'lucide-react';
 import { aiProviderManager, AIProviderId } from '@/lib/llm/providers';
 import { dbPersistence } from '@/lib/db/schema';
@@ -27,8 +27,40 @@ export const SettingsView: React.FC = () => {
   const [apiKey, setApiKey] = useState<string>('');
   const [saved, setSaved] = useState<boolean>(false);
 
+  // Load persistent credentials on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedAlpacaKey = localStorage.getItem('aitrader_alpaca_api_key') || '';
+      const savedAlpacaSecret = localStorage.getItem('aitrader_alpaca_secret_key') || '';
+      const savedAiProvider = (localStorage.getItem('aitrader_ai_provider') as AIProviderId) || 'mock';
+      const savedAiKey = localStorage.getItem('aitrader_ai_api_key') || '';
+
+      if (savedAlpacaKey) setAlpacaApiKey(savedAlpacaKey);
+      if (savedAlpacaSecret) setAlpacaSecretKey(savedAlpacaSecret);
+      if (savedAiProvider) setAiProvider(savedAiProvider);
+      if (savedAiKey) setApiKey(savedAiKey);
+
+      if (savedAlpacaKey && savedAlpacaSecret) {
+        alpacaBrokerClient.setCredentials({
+          apiKeyId: savedAlpacaKey,
+          secretKey: savedAlpacaSecret,
+          isPaper: true,
+        });
+        setUseAlpacaBroker(true);
+        setAlpacaStatus('Alpaca Paper Credentials Loaded from Browser Storage.');
+      }
+    }
+  }, []);
+
   const handleSave = async () => {
-    // Configure AI SDK
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('aitrader_alpaca_api_key', alpacaApiKey);
+      localStorage.setItem('aitrader_alpaca_secret_key', alpacaSecretKey);
+      localStorage.setItem('aitrader_ai_provider', aiProvider);
+      localStorage.setItem('aitrader_ai_api_key', apiKey);
+    }
+
+    // Configure AI SDK Provider
     aiProviderManager.setConfig({
       provider: aiProvider,
       apiKey,
@@ -44,11 +76,14 @@ export const SettingsView: React.FC = () => {
 
       try {
         const acc = await alpacaBrokerClient.getAccount();
-        setAlpacaStatus(`Connected! Equity: $${acc.equity.toLocaleString()}`);
+        setAlpacaStatus(`Connected & Saved! Equity: $${acc.equity.toLocaleString()}`);
         setUseAlpacaBroker(true);
       } catch (e: any) {
-        setAlpacaStatus(`Alpaca Connection Error: ${e.message}`);
+        setAlpacaStatus(`Saved, but Alpaca returned error: ${e.message}`);
       }
+    } else {
+      setAlpacaStatus('Local Paper Broker Active (No Alpaca keys entered).');
+      setUseAlpacaBroker(false);
     }
 
     setSaved(true);
@@ -83,10 +118,10 @@ export const SettingsView: React.FC = () => {
         <div>
           <h2 className="text-2xl font-bold text-white flex items-center gap-2">
             <Settings className="w-6 h-6 text-gray-400" />
-            System Configuration & Alpaca Credentials
+            System Configuration & Persistent Credentials
           </h2>
           <p className="text-xs text-gray-400">
-            Configure Alpaca Paper Trading API keys, real live market data sources, and LLM API keys.
+            Configure Alpaca Paper Trading API keys, real live market data sources, and LLM API keys. Keys save persistently to your browser.
           </p>
         </div>
         <button
@@ -105,8 +140,8 @@ export const SettingsView: React.FC = () => {
             <Database className="w-5 h-5 text-emerald-400" />
             Alpaca Paper Trading API Configuration
           </h3>
-          <span className={`text-xs px-2.5 py-1 rounded font-bold ${useAlpacaBroker ? 'bg-emerald-500/20 text-emerald-400' : 'bg-gray-800 text-gray-400'}`}>
-            {useAlpacaBroker ? 'Alpaca Active' : 'Local Paper Broker'}
+          <span className={`text-xs px-2.5 py-1 rounded font-bold ${useAlpacaBroker ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-gray-800 text-gray-400 border border-gray-700'}`}>
+            {useAlpacaBroker ? 'Alpaca Account Active' : 'Local Paper Broker'}
           </span>
         </div>
 
@@ -135,13 +170,14 @@ export const SettingsView: React.FC = () => {
         </div>
 
         {alpacaStatus && (
-          <div className="p-3 bg-[#0B111E] border border-gray-800 rounded-xl text-xs font-semibold text-emerald-400">
-            {alpacaStatus}
+          <div className="p-3 bg-[#0B111E] border border-gray-800 rounded-xl text-xs font-semibold text-emerald-400 flex items-center gap-2">
+            <Check className="w-4 h-4 text-emerald-400" />
+            <span>{alpacaStatus}</span>
           </div>
         )}
       </div>
 
-      {/* Live Market WebSocket & AI Provider Settings */}
+      {/* Live Market Data & LLM API Provider Settings */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="glass-panel p-6 rounded-2xl border border-gray-800 space-y-4">
           <h3 className="text-base font-bold text-white flex items-center gap-2">

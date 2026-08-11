@@ -2,7 +2,9 @@
 
 import React from 'react';
 import { MarketSnapshot, AgentSignal, LLMDecision, RiskCheckResult, PortfolioState } from '@/types/trading';
-import { TrendingUp, ShieldCheck, Zap, Activity, Brain, Target, AlertTriangle, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { TrendingUp, ShieldCheck, Zap, Activity, Brain, Target, AlertTriangle, ArrowUpRight, ArrowDownRight, Database, Key, CheckCircle2 } from 'lucide-react';
+import { alpacaBrokerClient } from '@/lib/broker/alpaca';
+import { aiProviderManager } from '@/lib/llm/providers';
 
 interface DashboardViewProps {
   snapshot: MarketSnapshot;
@@ -11,6 +13,7 @@ interface DashboardViewProps {
   riskCheck: RiskCheckResult;
   portfolio: PortfolioState;
   onExecuteTrade: () => void;
+  onNavigateSettings?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -20,13 +23,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   riskCheck,
   portfolio,
   onExecuteTrade,
+  onNavigateSettings,
 }) => {
   const isBullish = decision.action === 'BUY';
   const isBearish = decision.action === 'SELL';
+  const hasAlpaca = alpacaBrokerClient.hasCredentials();
+  const currentAIProvider = aiProviderManager.getConfig().provider;
 
   return (
     <div className="space-y-6">
-      {/* Top Banner Ticker & Quick Status */}
+      {/* Top Banner Ticker & Alpaca Connection Quick Status */}
       <div className="glass-panel p-5 rounded-2xl flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
@@ -37,6 +43,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <h2 className="text-2xl font-bold text-white tracking-wide">{snapshot.symbol}</h2>
               <span className="px-2 py-0.5 rounded text-xs font-semibold bg-gray-800 text-gray-300 border border-gray-700">
                 LIVE STREAM
+              </span>
+              <span className={`px-2 py-0.5 rounded text-xs font-bold border ${
+                hasAlpaca ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+              }`}>
+                {hasAlpaca ? 'ALPACA PAPER LIVE' : 'PAPER SIMULATION'}
               </span>
             </div>
             <p className="text-sm text-gray-400">
@@ -64,7 +75,32 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* Main AI Decision Card & Portfolio Summary Grid */}
+      {/* LLM API Field Status Bar */}
+      <div className="glass-panel p-4 rounded-xl border border-gray-800 flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-[#0B111E] to-[#0F172A]">
+        <div className="flex items-center gap-3">
+          <Key className="w-5 h-5 text-purple-400 shrink-0" />
+          <div>
+            <span className="text-xs font-bold text-white block">
+              LLM Provider Status: {currentAIProvider === 'mock' ? 'Built-in Deterministic Quant Synthesizer' : `Live API (${currentAIProvider.toUpperCase()})`}
+            </span>
+            <span className="text-[11px] text-gray-400">
+              {currentAIProvider === 'mock'
+                ? 'Operating on 8 Specialist Quant Agents. Add your OpenAI / Anthropic / Gemini API key in Settings to activate external LLM models.'
+                : 'Connected to live LLM API provider for structured decision generation.'}
+            </span>
+          </div>
+        </div>
+        {onNavigateSettings && (
+          <button
+            onClick={onNavigateSettings}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-purple-600/20 text-purple-300 border border-purple-500/30 hover:bg-purple-600/30 transition-all whitespace-nowrap"
+          >
+            Configure LLM API Key
+          </button>
+        )}
+      </div>
+
+      {/* Main AI Decision Card & Alpaca Paper Portfolio Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main Decision Highlight Card */}
         <div className={`lg:col-span-2 glass-panel p-6 rounded-2xl relative overflow-hidden ${
@@ -144,25 +180,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   : 'bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-700'
               }`}
             >
-              Execute Paper Trade
+              {hasAlpaca ? 'Submit Alpaca Paper Order' : 'Execute Paper Trade'}
             </button>
           </div>
         </div>
 
-        {/* Paper Portfolio Quick Summary */}
+        {/* Alpaca Paper Portfolio Summary Card */}
         <div className="glass-panel p-6 rounded-2xl flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between pb-4 border-b border-gray-800 mb-4">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <Target className="w-5 h-5 text-emerald-400" />
-                Paper Portfolio
+                <Database className="w-5 h-5 text-emerald-400" />
+                {hasAlpaca ? 'Alpaca Paper Account' : 'Paper Portfolio'}
               </h3>
-              <span className="text-xs px-2 py-1 rounded bg-emerald-500/20 text-emerald-400 font-medium">Active</span>
+              <span className={`text-xs px-2 py-1 rounded font-bold ${
+                hasAlpaca ? 'bg-emerald-500/20 text-emerald-400' : 'bg-blue-500/20 text-blue-400'
+              }`}>
+                {hasAlpaca ? 'Alpaca API Connected' : 'Simulated'}
+              </span>
             </div>
 
             <div className="space-y-4">
               <div>
-                <span className="text-xs text-gray-400">Total Portfolio Equity</span>
+                <span className="text-xs text-gray-400">Account Equity</span>
                 <p className="text-3xl font-black text-white">${portfolio.equity.toLocaleString()}</p>
               </div>
 
@@ -170,7 +210,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <div className="p-3 bg-[#0B111E] rounded-xl border border-gray-800">
                   <span className="text-xs text-gray-400">Total P&L</span>
                   <p className={`text-base font-bold ${portfolio.totalPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {portfolio.totalPnL >= 0 ? '+' : ''}${portfolio.totalPnL} ({portfolio.totalPnLPercent}%)
+                    {portfolio.totalPnL >= 0 ? '+' : ''}${portfolio.totalPnL.toFixed(2)} ({portfolio.totalPnLPercent.toFixed(2)}%)
                   </p>
                 </div>
                 <div className="p-3 bg-[#0B111E] rounded-xl border border-gray-800">
@@ -182,16 +222,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <p className="text-base font-bold text-purple-400">{portfolio.profitFactor}</p>
                 </div>
                 <div className="p-3 bg-[#0B111E] rounded-xl border border-gray-800">
-                  <span className="text-xs text-gray-400">Max Drawdown</span>
-                  <p className="text-base font-bold text-amber-400">{portfolio.maxDrawdownPercent}%</p>
+                  <span className="text-xs text-gray-400">Buying Power</span>
+                  <p className="text-base font-bold text-amber-400">${(portfolio.freeMargin || portfolio.equity).toLocaleString()}</p>
                 </div>
               </div>
             </div>
           </div>
 
           <div className="mt-6 pt-4 border-t border-gray-800 flex items-center justify-between text-xs text-gray-400">
-            <span>Free Margin: ${portfolio.freeMargin.toLocaleString()}</span>
-            <span>Used: ${portfolio.marginUsed.toLocaleString()}</span>
+            <span>Cash: ${portfolio.balance.toLocaleString()}</span>
+            <span>Mode: {hasAlpaca ? 'Alpaca Broker' : 'Local Engine'}</span>
           </div>
         </div>
       </div>
