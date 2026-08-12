@@ -1,77 +1,113 @@
-import { LLMDecision, AgentSignal, TradeHistoryItem, PortfolioState } from '@/types/trading';
+import { SymbolId, LLMDecision, TradeHistoryItem } from '@/types/trading';
 
-export interface DecisionLogEntry {
-  id: string;
+export interface DecisionJournalEntry {
+  decisionId: string;
   timestamp: number;
-  symbol: string;
+  symbol: SymbolId;
   price: number;
   action: string;
   confidence: number;
+  entry: number | null;
+  stopLoss: number | null;
+  takeProfit: number | null;
   regime: string;
-  reasoning: string;
+  reasoning: string[];
+  outcome: 'WIN' | 'LOSS' | 'BREAKEVEN' | 'PENDING';
+  realizedPnL?: number;
+  rMultiple?: number;
 }
 
-export class DatabasePersistence {
-  private decisionLogs: DecisionLogEntry[] = [];
+let decisionCounter = 0;
 
-  public saveDecisionLog(
-    symbol: string,
-    price: number,
-    decision: LLMDecision
-  ) {
-    const entry: DecisionLogEntry = {
-      id: 'log-' + Date.now(),
-      timestamp: Date.now(),
-      symbol,
-      price,
-      action: decision.action,
-      confidence: decision.confidence,
-      regime: decision.regime,
-      reasoning: decision.reasoning.join(' | '),
-    };
+export function generateDecisionId(): string {
+  decisionCounter++;
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+  return `DEC-${dateStr}-${String(decisionCounter).padStart(6, '0')}`;
+}
 
-    this.decisionLogs.unshift(entry);
-    if (this.decisionLogs.length > 500) {
-      this.decisionLogs.pop();
+export class DBPersistence {
+  private decisions: DecisionJournalEntry[] = [];
+  private readonly KEY = 'aitrader_decisions';
+
+  constructor() {
+    this.load();
+  }
+
+  private load() {
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem(this.KEY);
+        if (raw) this.decisions = JSON.parse(raw).slice(-500); // keep last 500
+      } catch {
+        this.decisions = [];
+      }
     }
   }
 
-  public getDecisionLogs(): DecisionLogEntry[] {
-    return this.decisionLogs;
+  private save() {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(this.KEY, JSON.stringify(this.decisions.slice(-500)));
+      } catch {
+        // localStorage full — trim older entries
+        this.decisions = this.decisions.slice(-100);
+      }
+    }
   }
 
-  public exportDecisionsToCSV(): string {
-    const headers = ['ID', 'Timestamp', 'Symbol', 'Price', 'Action', 'Confidence', 'Regime', 'Reasoning'];
-    const rows = this.decisionLogs.map((log) => [
-      log.id,
-      new Date(log.timestamp).toISOString(),
-      log.symbol,
-      log.price,
-      log.action,
-      log.confidence,
-      log.regime,
-      `"${log.reasoning.replace(/"/g, '""')}"`,
-    ]);
-
-    return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+  saveDecisionLog(symbol: SymbolId, price: number, decision: LLMDecision) {
+    const entry: DecisionJournalEntry = {
+      decisionId: decision.decisionId ?? generateDecisionId(),
+      timestamp: Date.now(),
+      symbol, price,
+      action: decision.action,
+      confidence: decision.confidence,
+      entry: decision.entry,
+      stopLoss: decision.stopLoss,
+      takeProfit: decision.takeProfit,
+      regime: decision.regime,
+      reasoning: decision.reasoning,
+      outcome: 'PENDING',
+    };
+    this.decisions.push(entry);
+    this.save();
   }
 
-  public exportTradesToCSV(trades: TradeHistoryItem[]): string {
-    const headers = ['ID', 'Symbol', 'Side', 'EntryPrice', 'ExitPrice', 'Size', 'RealizedPnL', 'CloseReason', 'ClosedAt'];
-    const rows = trades.map((t) => [
-      t.id,
-      t.symbol,
-      t.side,
-      t.entryPrice,
-      t.exitPrice,
-      t.size,
-      t.realizedPnL,
-      t.closeReason,
-      new Date(t.closedAt).toISOString(),
-    ]);
+  updateDecisionOutcome(decisionId: string, trade: TradeHistoryItem) {
+    const entry = this.decisions.find(d => d.decisionId === decisionId);
+    if (entry) {
+      entry.outcome = trade.realizedPnL > 0 ? 'WIN' : trade.realizedPnL < 0 ? 'LOSS' : 'BREAKEVEN';
+      entry.realizedPnL = trade.realizedPnL;
+      entry.rMultiple = trade.rMultiple;
+      this.save();
+    }
+  }
 
-    return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+  getDecisions(): DecisionJournalEntry[] {
+    return [...this.decisions].reverse();
+  }
+
+  exportDecisionsToCSV(): string {
+    const headers = ['decisionId', 'timestamp', 'symbol', 'price', 'action', 'confidence', 'entry', 'stopLoss', 'takeProfit', 'regime', 'outcome', 'realizedPnL', 'rMultiple'];
+    const rows = this.decisions.map(d =>
+      [d.decisionId, new Date(d.timestamp).toISOString(), d.symbol, d.price, d.action, d.confidence, d.entry, d.stopLoss, d.takeProfit, d.regime, d.outcome, d.realizedPnL ?? '', d.rMultiple ?? ''].join(',')
+    );
+    return [headers.join(','), ...rows].join('\n');
+  }
+
+  exportTradesToCSV(trades: TradeHistoryItem[]): string {
+    const headers = ['id', 'symbol', 'side', 'entry', 'exit', 'size', 'pnl', 'fee', 'slippage', 'rMultiple', 'reason', 'openedAt', 'closedAt'];
+    const rows = trades.map(t =>
+      [t.id, t.symbol, t.side, t.entryPrice, t.exitPrice, t.size, t.realizedPnL, t.fee, t.slippage, t.rMultiple, t.closeReason, new Date(t.openedAt).toISOString(), new Date(t.closedAt).toISOString()].join(',')
+    );
+    return [headers.join(','), ...rows].join('\n');
+  }
+
+  clearAll() {
+    this.decisions = [];
+    this.save();
   }
 }
 
-export const dbPersistence = new DatabasePersistence();
+export const dbPersistence = new DBPersistence();

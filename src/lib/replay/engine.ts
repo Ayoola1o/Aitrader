@@ -68,14 +68,14 @@ export class DecisionReplayEngine {
     const abstentionRate = totalSteps > 0 ? Number(((abstainCount / totalSteps) * 100).toFixed(1)) : 0;
 
     const agentMetrics: AgentPerformanceMetric[] = [
-      { agentId: 'regime', agentName: 'Market Regime Agent', accuracy: 78.4, contribution: 16.2, signalsGenerated: 142, successfulSignals: 111 },
-      { agentId: 'technical', agentName: 'Technical Agent', accuracy: 71.2, contribution: 14.5, signalsGenerated: 180, successfulSignals: 128 },
-      { agentId: 'liquidity', agentName: 'Liquidity Agent', accuracy: 76.5, contribution: 18.1, signalsGenerated: 130, successfulSignals: 99 },
-      { agentId: 'positioning', agentName: 'Positioning Agent', accuracy: 68.9, contribution: 11.4, signalsGenerated: 115, successfulSignals: 79 },
-      { agentId: 'momentum', agentName: 'Momentum Agent', accuracy: 73.0, contribution: 13.8, signalsGenerated: 155, successfulSignals: 113 },
-      { agentId: 'volatility', agentName: 'Volatility Agent', accuracy: 70.5, contribution: 9.6, signalsGenerated: 98, successfulSignals: 69 },
-      { agentId: 'macro', agentName: 'Macro Agent', accuracy: 64.1, contribution: 4.2, signalsGenerated: 75, successfulSignals: 48 },
-      { agentId: 'execution', agentName: 'Execution Agent', accuracy: 88.2, contribution: 12.0, signalsGenerated: 190, successfulSignals: 168 },
+      { agentId: 'regime', agentName: 'Market Regime Agent', accuracy: 78.4, contribution: 16.2, signalsGenerated: 142, successfulSignals: 111, noTradeSignals: 18 },
+      { agentId: 'technical', agentName: 'Technical Agent', accuracy: 71.2, contribution: 14.5, signalsGenerated: 180, successfulSignals: 128, noTradeSignals: 12 },
+      { agentId: 'liquidity', agentName: 'Liquidity Agent', accuracy: 76.5, contribution: 18.1, signalsGenerated: 130, successfulSignals: 99, noTradeSignals: 22 },
+      { agentId: 'positioning', agentName: 'Positioning Agent', accuracy: 0, contribution: 0, signalsGenerated: 0, successfulSignals: 0, noTradeSignals: 0 },
+      { agentId: 'momentum', agentName: 'Momentum Agent', accuracy: 73.0, contribution: 13.8, signalsGenerated: 155, successfulSignals: 113, noTradeSignals: 14 },
+      { agentId: 'volatility', agentName: 'Volatility Agent', accuracy: 70.5, contribution: 9.6, signalsGenerated: 98, successfulSignals: 69, noTradeSignals: 20 },
+      { agentId: 'macro', agentName: 'Macro Agent', accuracy: 0, contribution: 0, signalsGenerated: 0, successfulSignals: 0, noTradeSignals: 0 },
+      { agentId: 'execution', agentName: 'Execution Agent', accuracy: 88.2, contribution: 12.0, signalsGenerated: 190, successfulSignals: 168, noTradeSignals: 8 },
     ];
 
     return {

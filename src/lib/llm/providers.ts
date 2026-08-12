@@ -1,194 +1,250 @@
-import { LLMDecision, MarketSnapshot, FeatureVector, AgentSignal, SignalFusionResult, RegimeType } from '@/types/trading';
+import {
+  MarketSnapshot, FeatureVector, AgentSignal, SignalFusionResult,
+  LLMDecision, RegimeType, ActionType
+} from '@/types/trading';
 
-export type AIProviderId = 'mock' | 'openai' | 'anthropic' | 'google' | 'ollama';
+export type AIProviderId = 'mock' | 'openai' | 'anthropic' | 'google';
 
 export interface AIProviderConfig {
   provider: AIProviderId;
   apiKey?: string;
-  modelName?: string;
 }
 
-export class AIProviderManager {
-  private config: AIProviderConfig = {
-    provider: 'mock',
-    modelName: 'gpt-4o-mini',
-  };
+// ── Compact Evidence Packet (what the LLM receives) ──────────────────────────
+function buildEvidencePacket(
+  snapshot: MarketSnapshot,
+  features: FeatureVector,
+  signals: AgentSignal[],
+  fusion: SignalFusionResult,
+  regime: RegimeType
+): string {
+  const available = signals.filter(s => s.dataQuality !== 'UNAVAILABLE');
+  return JSON.stringify({
+    market: {
+      symbol: snapshot.symbol,
+      price: snapshot.price,
+      spread_pct: (features.spreadPercent * 100).toFixed(4) + '%',
+      change_24h: snapshot.change24h + '%',
+      data_quality: snapshot.dataQuality.overallScore + '%',
+    },
+    regime: { type: regime, adx: features.adx, ema_stack: features.ema20 > features.ema50 ? 'bullish' : 'bearish' },
+    technical: { rsi: features.rsi, macd: features.macd > features.macdSignal ? 'bullish' : 'bearish', ema20: features.ema20, ema50: features.ema50 },
+    momentum: { roc: features.roc.toFixed(2) + '%', volume_z: features.volumeZScore.toFixed(2), divergence: features.momentumDivergence },
+    liquidity: { imbalance: features.bidAskImbalance.toFixed(3), slippage_risk: features.slippageRisk, sweep: features.sweepDetected },
+    volatility: { realized: features.realizedVol + '%', percentile: features.volPercentile + '%', atr: features.atr },
+    macro: { status: 'UNAVAILABLE' },
+    agent_fusion: {
+      buy_score: fusion.buyScore,
+      sell_score: fusion.sellScore,
+      confidence: fusion.confidence,
+      dominant: fusion.dominantAction,
+      conflict: fusion.conflictingSignals,
+    },
+    agents: available.map(s => ({
+      id: s.agentId,
+      action: s.action,
+      confidence: s.confidence,
+      evidence: s.evidence.slice(0, 3).map(e => `${e.label}: ${e.value}`),
+    })),
+  });
+}
 
-  public setConfig(config: AIProviderConfig) {
-    this.config = config;
+// ── Deterministic Synthesizer (no API) ───────────────────────────────────────
+function deterministicDecision(
+  snapshot: MarketSnapshot,
+  features: FeatureVector,
+  fusion: SignalFusionResult,
+  regime: RegimeType
+): LLMDecision {
+  const price = snapshot.price;
+  const atr = features.atr > 0 ? features.atr : price * 0.012;
+  const action = fusion.dominantAction;
+
+  if (action === 'HOLD' || action === 'NO_TRADE') {
+    return {
+      action,
+      confidence: fusion.confidence,
+      entry: null, stopLoss: null, takeProfit: null,
+      riskPercent: 0, positionSize: 0, riskReward: 0,
+      reasoning: [
+        fusion.abstainReason ?? 'Market conditions do not meet edge requirements.',
+        `Regime: ${regime}. Fusion confidence: ${(fusion.confidence * 100).toFixed(0)}%.`,
+      ],
+      invalidation: ['Breakout above key pivot level', 'Volume surge with directional confirmation'],
+      timeHorizon: 'INTRADAY', regime,
+    };
   }
 
-  public getConfig(): AIProviderConfig {
+  const isLong = action === 'BUY';
+  const stopDistance = atr * 1.5;
+  const stopLoss = Number((isLong ? price - stopDistance : price + stopDistance).toFixed(price > 100 ? 2 : 5));
+  const takeProfit = Number((isLong ? price + stopDistance * 2.5 : price - stopDistance * 2.5).toFixed(price > 100 ? 2 : 5));
+  const riskReward = stopDistance > 0 ? 2.5 : 0;
+
+  return {
+    action,
+    confidence: fusion.confidence,
+    entry: price, stopLoss, takeProfit,
+    riskPercent: 0.5, riskReward,
+    reasoning: [
+      `${regime} regime confirmed. ADX: ${features.adx.toFixed(1)}.`,
+      `RSI ${features.rsi.toFixed(1)} — ${features.rsi < 35 ? 'oversold' : features.rsi > 65 ? 'overbought' : 'neutral range'}.`,
+      `Liquidity: ${features.slippageRisk} slippage risk. Spread: ${(features.spreadPercent * 100).toFixed(4)}%.`,
+    ],
+    invalidation: [
+      `Price closes beyond stop at $${stopLoss}.`,
+      `Spread expands beyond 0.05%.`,
+      `ADX drops below 18 (regime invalidation).`,
+    ],
+    timeHorizon: 'INTRADAY', regime,
+  };
+}
+
+// ── LLM System Prompt ─────────────────────────────────────────────────────────
+const SYSTEM_PROMPT = `You are a quantitative market decision moderator.
+
+RULES (non-negotiable):
+1. You MUST only use evidence supplied in the structured input.
+2. You MUST NOT invent: prices, indicators, OI, funding, news, macro data, or liquidity conditions.
+3. If required information is UNAVAILABLE, state it explicitly — do not fabricate.
+4. When evidence conflicts materially, you MUST return NO_TRADE.
+5. Your decision is ADVISORY — the risk engine has final authority.
+
+Respond ONLY in valid JSON matching this schema:
+{
+  "action": "BUY"|"SELL"|"HOLD"|"NO_TRADE",
+  "confidence": 0.0-1.0,
+  "entry": number|null,
+  "stopLoss": number|null,
+  "takeProfit": number|null,
+  "riskPercent": 0.1-2.0,
+  "reasoning": ["string", ...],
+  "invalidation": ["string", ...],
+  "timeHorizon": "SCALP"|"INTRADAY"|"SWING"
+}`;
+
+// ── AI Provider Manager ───────────────────────────────────────────────────────
+export class AIProviderManager {
+  private config: AIProviderConfig = { provider: 'mock' };
+
+  setConfig(config: AIProviderConfig) {
+    this.config = config;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('aitrader_ai_provider', config.provider);
+      if (config.apiKey) localStorage.setItem('aitrader_ai_api_key', config.apiKey);
+    }
+  }
+
+  getConfig(): AIProviderConfig {
+    if (typeof window !== 'undefined') {
+      const p = localStorage.getItem('aitrader_ai_provider') as AIProviderId;
+      const k = localStorage.getItem('aitrader_ai_api_key');
+      if (p) return { provider: p, apiKey: k ?? undefined };
+    }
     return this.config;
   }
 
-  public async generateStructuredDecision(
+  async generateStructuredDecision(
     snapshot: MarketSnapshot,
     features: FeatureVector,
     signals: AgentSignal[],
     fusion: SignalFusionResult,
     regime: RegimeType
   ): Promise<LLMDecision> {
-    // If mock or no API key, use fast deterministic synthesizer
-    if (this.config.provider === 'mock' || !this.config.apiKey) {
-      return this.generateDeterministicDecision(snapshot, features, signals, fusion, regime);
-    }
-
-    try {
-      if (this.config.provider === 'openai') {
-        const decision = await this.callOpenAI(snapshot, features, signals, fusion, regime);
-        if (decision) return decision;
-      } else if (this.config.provider === 'anthropic') {
-        const decision = await this.callAnthropic(snapshot, features, signals, fusion, regime);
-        if (decision) return decision;
-      }
-    } catch {
-      // Fallback if API fails or network blocks request
-    }
-
-    return this.generateDeterministicDecision(snapshot, features, signals, fusion, regime);
-  }
-
-  private generateDeterministicDecision(
-    snapshot: MarketSnapshot,
-    features: FeatureVector,
-    signals: AgentSignal[],
-    fusion: SignalFusionResult,
-    regime: RegimeType
-  ): LLMDecision {
-    const price = snapshot.price;
-    const atr = features.atr > 0 ? features.atr : price * 0.015;
-    const isLong = fusion.dominantAction === 'BUY';
-
-    if (fusion.dominantAction === 'HOLD' || fusion.dominantAction === 'NO_TRADE') {
+    // If data is critically stale → NO_TRADE immediately
+    if (snapshot.dataQuality.criticalStale && snapshot.appMode === 'PAPER') {
       return {
-        action: fusion.dominantAction,
-        confidence: fusion.confidence,
-        entry: null,
-        stopLoss: null,
-        takeProfit: null,
-        riskPercent: 0,
-        reasoning: [
-          fusion.abstainReason || 'Market conditions do not meet minimum edge requirements.',
-          `Regime ${regime} with caution score ${fusion.noTradeScore}.`,
-        ],
-        invalidation: ['Breakout above key pivot level'],
-        timeHorizon: 'INTRADAY',
-        regime,
+        action: 'NO_TRADE', confidence: 1.0,
+        entry: null, stopLoss: null, takeProfit: null, riskPercent: 0,
+        reasoning: ['Critical market data is stale — trading halted per fail-closed policy.'],
+        invalidation: ['Wait for live data reconnection.'],
+        timeHorizon: 'INTRADAY', regime,
       };
     }
 
-    const stopDistance = atr * 1.5;
-    const stopLoss = Number((isLong ? price - stopDistance : price + stopDistance).toFixed(price > 1000 ? 2 : 4));
-    const takeProfit = Number((isLong ? price + stopDistance * 2.22 : price - stopDistance * 2.22).toFixed(price > 1000 ? 2 : 4));
+    const cfg = this.getConfig();
+    const evidencePacket = buildEvidencePacket(snapshot, features, signals, fusion, regime);
 
-    return {
-      action: fusion.dominantAction,
-      confidence: fusion.confidence,
-      entry: price,
-      stopLoss,
-      takeProfit,
-      riskPercent: 0.65,
-      reasoning: [
-        `${regime} state verified across quant agents.`,
-        `RSI ${features.rsi} & ADX ${features.adx} align with dominant direction.`,
-        `Liquidity score ${features.liquidityScore} supports order fill.`,
-      ],
-      invalidation: [
-        `Price closes past stop loss at $${stopLoss}.`,
-        `Order book spread expands beyond 0.03%.`,
-      ],
-      timeHorizon: 'INTRADAY',
-      regime,
-    };
+    if (cfg.provider !== 'mock' && cfg.apiKey) {
+      try {
+        const result = await this.callProvider(cfg, evidencePacket, snapshot.price, regime);
+        if (result) return result;
+      } catch {
+        // fall through to deterministic
+      }
+    }
+
+    return deterministicDecision(snapshot, features, fusion, regime);
   }
 
-  private async callOpenAI(
-    snapshot: MarketSnapshot,
-    features: FeatureVector,
-    signals: AgentSignal[],
-    fusion: SignalFusionResult,
+  private async callProvider(
+    cfg: AIProviderConfig,
+    evidencePacket: string,
+    currentPrice: number,
     regime: RegimeType
   ): Promise<LLMDecision | null> {
-    const prompt = `System: You are an AI Quant Decision Engine. Respond ONLY in valid JSON matching this schema:
-{"action": "BUY"|"SELL"|"HOLD"|"NO_TRADE", "confidence": number, "entry": number|null, "stopLoss": number|null, "takeProfit": number|null, "riskPercent": number, "reasoning": string[], "invalidation": string[], "timeHorizon": "SCALP"|"INTRADAY"|"SWING", "regime": "${regime}"}
+    const userMsg = `Market evidence packet:\n${evidencePacket}\n\nCurrent price: ${currentPrice}. Provide your trading decision.`;
 
-Market: Asset ${snapshot.symbol}, Price ${snapshot.price}, RSI ${features.rsi}, ADX ${features.adx}, Dominant Action ${fusion.dominantAction}, Score BUY ${fusion.buyScore}/SELL ${fusion.sellScore}.`;
+    let rawText: string | null = null;
 
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.config.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: prompt }],
-        response_format: { type: 'json_object' },
-      }),
-    });
+    if (cfg.provider === 'openai') {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${cfg.apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: userMsg }],
+          response_format: { type: 'json_object' },
+          max_tokens: 600,
+        }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      rawText = data.choices?.[0]?.message?.content;
+    } else if (cfg.provider === 'anthropic') {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': cfg.apiKey!,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-3-5-haiku-20241022',
+          max_tokens: 600,
+          system: SYSTEM_PROMPT,
+          messages: [{ role: 'user', content: userMsg }],
+        }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      rawText = data.content?.[0]?.text;
+    }
 
-    if (!res.ok) return null;
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) return null;
+    if (!rawText) return null;
 
-    const parsed = JSON.parse(content);
-    return {
-      action: parsed.action || fusion.dominantAction,
-      confidence: parsed.confidence || fusion.confidence,
-      entry: parsed.entry || snapshot.price,
-      stopLoss: parsed.stopLoss,
-      takeProfit: parsed.takeProfit,
-      riskPercent: parsed.riskPercent || 0.65,
-      reasoning: parsed.reasoning || ['OpenAI Live decision calculated.'],
-      invalidation: parsed.invalidation || ['Stop loss breach.'],
-      timeHorizon: parsed.timeHorizon || 'INTRADAY',
-      regime,
-    };
-  }
+    try {
+      const parsed = JSON.parse(rawText);
+      // Validate required fields
+      const validActions = ['BUY', 'SELL', 'HOLD', 'NO_TRADE'];
+      if (!validActions.includes(parsed.action)) return null;
+      if (typeof parsed.confidence !== 'number') return null;
 
-  private async callAnthropic(
-    snapshot: MarketSnapshot,
-    features: FeatureVector,
-    signals: AgentSignal[],
-    fusion: SignalFusionResult,
-    regime: RegimeType
-  ): Promise<LLMDecision | null> {
-    const prompt = `Analyze: Asset ${snapshot.symbol}, Price ${snapshot.price}, RSI ${features.rsi}, ADX ${features.adx}, Fusion ${fusion.dominantAction}. Respond in strict JSON.`;
-
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': this.config.apiKey || '',
-        'anthropic-version': '2023-06-01',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'claude-3-5-haiku-20241022',
-        max_tokens: 500,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-
-    if (!res.ok) return null;
-    const data = await res.json();
-    const text = data.content?.[0]?.text;
-    if (!text) return null;
-
-    const parsed = JSON.parse(text);
-    return {
-      action: parsed.action || fusion.dominantAction,
-      confidence: parsed.confidence || fusion.confidence,
-      entry: parsed.entry || snapshot.price,
-      stopLoss: parsed.stopLoss,
-      takeProfit: parsed.takeProfit,
-      riskPercent: parsed.riskPercent || 0.65,
-      reasoning: parsed.reasoning || ['Anthropic Live decision calculated.'],
-      invalidation: parsed.invalidation || ['Stop loss breach.'],
-      timeHorizon: parsed.timeHorizon || 'INTRADAY',
-      regime,
-    };
+      return {
+        action: parsed.action as ActionType,
+        confidence: Math.min(1, Math.max(0, parsed.confidence)),
+        entry: typeof parsed.entry === 'number' ? parsed.entry : currentPrice,
+        stopLoss: typeof parsed.stopLoss === 'number' ? parsed.stopLoss : null,
+        takeProfit: typeof parsed.takeProfit === 'number' ? parsed.takeProfit : null,
+        riskPercent: typeof parsed.riskPercent === 'number' ? Math.min(2, Math.max(0.1, parsed.riskPercent)) : 0.5,
+        reasoning: Array.isArray(parsed.reasoning) ? parsed.reasoning.slice(0, 5) : ['LLM decision.'],
+        invalidation: Array.isArray(parsed.invalidation) ? parsed.invalidation.slice(0, 3) : [],
+        timeHorizon: ['SCALP', 'INTRADAY', 'SWING'].includes(parsed.timeHorizon) ? parsed.timeHorizon : 'INTRADAY',
+        regime,
+      };
+    } catch {
+      return null;
+    }
   }
 }
 

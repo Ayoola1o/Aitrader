@@ -1,167 +1,359 @@
-import { SymbolId, MarketSnapshot, Candle, OrderBook, TradeTick } from '@/types/trading';
+import {
+  SymbolId,
+  MarketSnapshot,
+  Candle,
+  OrderBook,
+  OrderBookLevel,
+  TradeTick,
+  AppMode,
+  DataQuality,
+  DataStatus,
+} from '@/types/trading';
+import { dataQualityEngine } from './DataQualityEngine';
 
-const BASE_PRICES: Record<SymbolId, number> = {
+// Last known good prices — used as STALE fallback
+const SEED_PRICES: Record<SymbolId, number> = {
   BTCUSDT: 64250.0,
   ETHUSDT: 3450.0,
   SOLUSDT: 148.5,
   XRPUSDT: 0.585,
 };
 
+interface LiveTickerData {
+  price: number;
+  bid: number;
+  ask: number;
+  change24h: number;
+  high24h: number;
+  low24h: number;
+  volume24h: number;
+  fetchedAt: number;
+  source: 'binance' | 'alpaca' | 'simulated';
+}
+
+interface LiveOrderBook {
+  bids: OrderBookLevel[];
+  asks: OrderBookLevel[];
+  fetchedAt: number;
+  source: 'binance' | 'alpaca' | 'simulated';
+}
+
+interface LiveTradesData {
+  trades: TradeTick[];
+  fetchedAt: number;
+  source: 'binance' | 'alpaca' | 'simulated';
+}
+
+interface LiveCandlesData {
+  candles: Candle[];
+  fetchedAt: number;
+  source: 'binance' | 'alpaca' | 'simulated';
+}
+
 export class MarketEngine {
-  private currentPrices: Record<SymbolId, number> = { ...BASE_PRICES };
-  private candles: Record<SymbolId, Candle[]> = {
-    BTCUSDT: [],
-    ETHUSDT: [],
-    SOLUSDT: [],
-    XRPUSDT: [],
+  private lastTicker: Record<SymbolId, LiveTickerData | null> = {
+    BTCUSDT: null, ETHUSDT: null, SOLUSDT: null, XRPUSDT: null,
   };
-  private tradeHistory: Record<SymbolId, TradeTick[]> = {
-    BTCUSDT: [],
-    ETHUSDT: [],
-    SOLUSDT: [],
-    XRPUSDT: [],
+  private lastOrderBook: Record<SymbolId, LiveOrderBook | null> = {
+    BTCUSDT: null, ETHUSDT: null, SOLUSDT: null, XRPUSDT: null,
   };
+  private lastTrades: Record<SymbolId, LiveTradesData | null> = {
+    BTCUSDT: null, ETHUSDT: null, SOLUSDT: null, XRPUSDT: null,
+  };
+  private lastCandles: Record<SymbolId, LiveCandlesData | null> = {
+    BTCUSDT: null, ETHUSDT: null, SOLUSDT: null, XRPUSDT: null,
+  };
+  private appMode: AppMode = 'PAPER';
+  private alpacaCredentials: { key: string; secret: string } | null = null;
 
-  constructor() {
-    this.initializeCandles();
+  setMode(mode: AppMode) { this.appMode = mode; }
+  setAlpacaCredentials(key: string, secret: string) {
+    this.alpacaCredentials = { key, secret };
   }
 
-  private initializeCandles() {
-    const symbols: SymbolId[] = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
-    const now = Date.now();
-    const intervalMs = 60 * 1000; // 1 minute
+  // ── Binance REST ticker ──────────────────────────────────────────────────
+  private async fetchBinanceTicker(symbol: SymbolId): Promise<LiveTickerData | null> {
+    try {
+      const [tickerRes, bookRes] = await Promise.allSettled([
+        fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`, { cache: 'no-store' }),
+        fetch(`https://api.binance.com/api/v3/ticker/bookTicker?symbol=${symbol}`, { cache: 'no-store' }),
+      ]);
 
-    symbols.forEach((symbol) => {
-      let price = BASE_PRICES[symbol];
-      const list: Candle[] = [];
-      const count = 100;
+      let price: number | null = null;
+      let change24h = 0, high24h = 0, low24h = 0, volume24h = 0;
+      let bid = 0, ask = 0;
 
-      for (let i = count; i >= 0; i--) {
-        const time = now - i * intervalMs;
-        const changePercent = (Math.random() - 0.49) * 0.006;
-        const open = price;
-        const close = price * (1 + changePercent);
-        const high = Math.max(open, close) * (1 + Math.random() * 0.002);
-        const low = Math.min(open, close) * (1 - Math.random() * 0.002);
-        const volume = (BASE_PRICES[symbol] > 1000 ? 5 : 500) * (0.5 + Math.random());
-
-        list.push({ time, open, high, low, close, volume });
-        price = close;
+      if (tickerRes.status === 'fulfilled' && tickerRes.value.ok) {
+        const d = await tickerRes.value.json();
+        price = parseFloat(d.lastPrice);
+        change24h = parseFloat(d.priceChangePercent);
+        high24h = parseFloat(d.highPrice);
+        low24h = parseFloat(d.lowPrice);
+        volume24h = parseFloat(d.volume);
       }
-      this.candles[symbol] = list;
-      this.currentPrices[symbol] = price;
-    });
+
+      if (bookRes.status === 'fulfilled' && bookRes.value.ok) {
+        const d = await bookRes.value.json();
+        bid = parseFloat(d.bidPrice);
+        ask = parseFloat(d.askPrice);
+        if (!price) price = (bid + ask) / 2;
+      }
+
+      if (!price) return null;
+
+      return {
+        price,
+        bid: bid || price * 0.9999,
+        ask: ask || price * 1.0001,
+        change24h,
+        high24h: high24h || price * 1.02,
+        low24h: low24h || price * 0.98,
+        volume24h,
+        fetchedAt: Date.now(),
+        source: 'binance',
+      };
+    } catch {
+      return null;
+    }
   }
 
-  public tick(symbol: SymbolId): MarketSnapshot {
-    const lastPrice = this.currentPrices[symbol];
-    const tickChangePercent = (Math.random() - 0.492) * 0.0015;
-    const newPrice = Number((lastPrice * (1 + tickChangePercent)).toFixed(symbol === 'XRPUSDT' ? 4 : 2));
-    this.currentPrices[symbol] = newPrice;
-
-    // Update last candle
-    const symbolCandles = this.candles[symbol];
-    const lastCandle = symbolCandles[symbolCandles.length - 1];
-    const now = Date.now();
-
-    if (now - lastCandle.time > 60000) {
-      // New candle
-      symbolCandles.shift();
-      symbolCandles.push({
-        time: now,
-        open: newPrice,
-        high: newPrice,
-        low: newPrice,
-        close: newPrice,
-        volume: (BASE_PRICES[symbol] > 1000 ? 0.8 : 80) * (0.5 + Math.random()),
+  // ── Alpaca REST fallback ─────────────────────────────────────────────────
+  private async fetchAlpacaTicker(symbol: SymbolId): Promise<LiveTickerData | null> {
+    if (!this.alpacaCredentials) return null;
+    try {
+      // Map crypto symbols to Alpaca format
+      const alpacaSymbol = symbol.replace('USDT', '/USD');
+      const url = `https://data.alpaca.markets/v1beta3/crypto/us/latest/trades?symbols=${alpacaSymbol}`;
+      const res = await fetch(url, {
+        headers: {
+          'APCA-API-KEY-ID': this.alpacaCredentials.key,
+          'APCA-API-SECRET-KEY': this.alpacaCredentials.secret,
+        },
+        cache: 'no-store',
       });
-    } else {
-      lastCandle.high = Math.max(lastCandle.high, newPrice);
-      lastCandle.low = Math.min(lastCandle.low, newPrice);
-      lastCandle.close = newPrice;
-      lastCandle.volume += (BASE_PRICES[symbol] > 1000 ? 0.05 : 5);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const trade = data.trades?.[alpacaSymbol];
+      if (!trade) return null;
+
+      const price = parseFloat(trade.p);
+      const last = this.lastTicker[symbol];
+      return {
+        price,
+        bid: price * 0.9999,
+        ask: price * 1.0001,
+        change24h: last ? ((price - last.price) / last.price) * 100 : 0,
+        high24h: last?.high24h || price * 1.02,
+        low24h: last?.low24h || price * 0.98,
+        volume24h: last?.volume24h || 0,
+        fetchedAt: Date.now(),
+        source: 'alpaca',
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  // ── Binance REST order book ──────────────────────────────────────────────
+  private async fetchBinanceOrderBook(symbol: SymbolId): Promise<LiveOrderBook | null> {
+    try {
+      const res = await fetch(
+        `https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=20`,
+        { cache: 'no-store' }
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      const mapLevels = (arr: [string, string][]): OrderBookLevel[] => {
+        let total = 0;
+        return arr.map(([p, s]) => {
+          const size = parseFloat(s);
+          total += size;
+          return { price: parseFloat(p), size, total };
+        });
+      };
+      return {
+        bids: mapLevels(data.bids || []),
+        asks: mapLevels(data.asks || []),
+        fetchedAt: Date.now(),
+        source: 'binance',
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  // ── Binance REST trades ──────────────────────────────────────────────────
+  private async fetchBinanceTrades(symbol: SymbolId, lastPrice: number): Promise<LiveTradesData | null> {
+    try {
+      const res = await fetch(
+        `https://api.binance.com/api/v3/trades?symbol=${symbol}&limit=50`,
+        { cache: 'no-store' }
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      const trades: TradeTick[] = data.map((t: any) => {
+        const price = parseFloat(t.price);
+        const bid = lastPrice * 0.9999;
+        const ask = lastPrice * 1.0001;
+        return {
+          id: String(t.id),
+          time: t.time,
+          price,
+          size: parseFloat(t.qty),
+          side: (price >= ask ? 'BUY' : price <= bid ? 'SELL' : 'UNKNOWN') as TradeTick['side'],
+        };
+      });
+      return { trades: trades.reverse(), fetchedAt: Date.now(), source: 'binance' };
+    } catch {
+      return null;
+    }
+  }
+
+  // ── Binance REST candles ─────────────────────────────────────────────────
+  private async fetchBinanceCandles(symbol: SymbolId): Promise<LiveCandlesData | null> {
+    try {
+      const res = await fetch(
+        `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1m&limit=100`,
+        { cache: 'no-store' }
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      const candles: Candle[] = data.map((k: any) => ({
+        time: k[0],
+        open: parseFloat(k[1]),
+        high: parseFloat(k[2]),
+        low: parseFloat(k[3]),
+        close: parseFloat(k[4]),
+        volume: parseFloat(k[5]),
+      }));
+      return { candles, fetchedAt: Date.now(), source: 'binance' };
+    } catch {
+      return null;
+    }
+  }
+
+  // ── Simulated order book from last price ────────────────────────────────
+  private buildSimulatedOrderBook(price: number): LiveOrderBook {
+    const bids: OrderBookLevel[] = [];
+    const asks: OrderBookLevel[] = [];
+    let bidTotal = 0, askTotal = 0;
+    for (let i = 1; i <= 15; i++) {
+      const bidP = Number((price - i * price * 0.0001).toFixed(price > 100 ? 2 : 4));
+      const askP = Number((price + i * price * 0.0001).toFixed(price > 100 ? 2 : 4));
+      const bidS = Number((Math.exp(-i * 0.15) * (price > 1000 ? 2 : 200)).toFixed(4));
+      const askS = Number((Math.exp(-i * 0.15) * (price > 1000 ? 2 : 200)).toFixed(4));
+      bidTotal += bidS; askTotal += askS;
+      bids.push({ price: bidP, size: bidS, total: bidTotal });
+      asks.push({ price: askP, size: askS, total: askTotal });
+    }
+    return { bids, asks, fetchedAt: Date.now(), source: 'simulated' };
+  }
+
+  private buildSimulatedCandles(price: number): LiveCandlesData {
+    const now = Date.now();
+    const candles: Candle[] = [];
+    let p = price * 0.98;
+    for (let i = 100; i >= 0; i--) {
+      const chg = (Math.sin(i * 0.15) * 0.002) + (i % 7 === 0 ? 0.003 : -0.001);
+      const open = p;
+      const close = p * (1 + chg);
+      const high = Math.max(open, close) * 1.0008;
+      const low = Math.min(open, close) * 0.9992;
+      candles.push({ time: now - i * 60000, open, high, low, close, volume: 50 + Math.abs(chg) * 5000 });
+      p = close;
+    }
+    return { candles, fetchedAt: Date.now(), source: 'simulated' };
+  }
+
+  // ── Main tick ────────────────────────────────────────────────────────────
+  public async tick(symbol: SymbolId): Promise<MarketSnapshot> {
+    // 1. Fetch ticker — Binance first, Alpaca fallback
+    let ticker = await this.fetchBinanceTicker(symbol);
+    if (!ticker) {
+      ticker = await this.fetchAlpacaTicker(symbol);
     }
 
-    // Generate Order Book
-    const orderBook = this.generateOrderBook(symbol, newPrice);
+    if (ticker) {
+      this.lastTicker[symbol] = ticker;
+    }
 
-    // Generate Trade Tick
-    const newTrade: TradeTick = {
-      id: Math.random().toString(36).substring(2, 9),
-      time: now,
-      price: newPrice,
-      size: Number(((Math.random() * (BASE_PRICES[symbol] > 1000 ? 0.5 : 50)) + 0.01).toFixed(3)),
-      side: tickChangePercent >= 0 ? 'BUY' : 'SELL',
+    const activeTicker = this.lastTicker[symbol];
+    const price = activeTicker?.price ?? SEED_PRICES[symbol];
+    const tickerSource = activeTicker?.source ?? 'simulated';
+
+    // 2. Fetch order book
+    let ob = await this.fetchBinanceOrderBook(symbol);
+    if (ob) {
+      this.lastOrderBook[symbol] = ob;
+    }
+    const activeOB = this.lastOrderBook[symbol] ?? this.buildSimulatedOrderBook(price);
+
+    // 3. Fetch trades
+    let trades = await this.fetchBinanceTrades(symbol, price);
+    if (trades) {
+      this.lastTrades[symbol] = trades;
+    }
+    const activeTrades = this.lastTrades[symbol];
+
+    // 4. Fetch candles
+    let candles = await this.fetchBinanceCandles(symbol);
+    if (candles) {
+      this.lastCandles[symbol] = candles;
+    }
+    const activeCandles = this.lastCandles[symbol] ?? this.buildSimulatedCandles(price);
+
+    // 5. Build order book summary
+    const bids = activeOB.bids;
+    const asks = activeOB.asks;
+    const bidDepth = bids.reduce((s, b) => s + b.size, 0);
+    const askDepth = asks.reduce((s, a) => s + a.size, 0);
+    const bidAskImbalance = bidDepth + askDepth > 0
+      ? (bidDepth - askDepth) / (bidDepth + askDepth)
+      : 0;
+    const bestBid = bids[0]?.price ?? price * 0.9999;
+    const bestAsk = asks[0]?.price ?? price * 1.0001;
+    const spread = bestAsk - bestBid;
+    const spreadPercent = spread / ((bestBid + bestAsk) / 2);
+    const midPrice = (bestBid + bestAsk) / 2;
+
+    const orderBook: OrderBook = {
+      bids, asks, spread, spreadPercent, bidAskImbalance, bidDepth, askDepth, midPrice,
     };
-    this.tradeHistory[symbol].unshift(newTrade);
-    if (this.tradeHistory[symbol].length > 30) {
-      this.tradeHistory[symbol].pop();
-    }
 
-    // 24h stats
-    const firstCandle = symbolCandles[0];
-    const change24h = Number((((newPrice - firstCandle.open) / firstCandle.open) * 100).toFixed(2));
-    const high24h = Math.max(...symbolCandles.map((c) => c.high));
-    const low24h = Math.min(...symbolCandles.map((c) => c.low));
-    const volume24h = Number(symbolCandles.reduce((acc, c) => acc + c.volume, 0).toFixed(2));
+    // 6. Data quality
+    const now = Date.now();
+    const dataQuality = dataQualityEngine.buildQuality({
+      tickerAge: activeTicker ? now - activeTicker.fetchedAt : null,
+      orderBookAge: activeOB.source !== 'simulated' ? now - activeOB.fetchedAt : null,
+      tradesAge: activeTrades ? now - activeTrades.fetchedAt : null,
+      candlesAge: activeCandles.source !== 'simulated' ? now - activeCandles.fetchedAt : null,
+      source: tickerSource as any,
+    });
 
     return {
       symbol,
-      price: newPrice,
-      change24h,
-      high24h: Number(high24h.toFixed(symbol === 'XRPUSDT' ? 4 : 2)),
-      low24h: Number(low24h.toFixed(symbol === 'XRPUSDT' ? 4 : 2)),
-      volume24h,
-      fundingRate: 0.0001 + Math.sin(now / 100000) * 0.00015,
-      openInterest: 125000000 + Math.random() * 500000,
-      openInterestChange24h: 3.42,
-      longShortRatio: 1.68 + (Math.random() - 0.5) * 0.1,
-      liquidations24h: { longs: 1240000, shorts: 480000 },
+      exchange: tickerSource === 'alpaca' ? 'Alpaca' : tickerSource === 'binance' ? 'Binance' : 'Demo',
+      timestamp: now,
+      price,
+      bid: activeTicker?.bid ?? bestBid,
+      ask: activeTicker?.ask ?? bestAsk,
+      spread,
+      change24h: activeTicker?.change24h ?? 0,
+      high24h: activeTicker?.high24h ?? price * 1.02,
+      low24h: activeTicker?.low24h ?? price * 0.98,
+      volume24h: activeTicker?.volume24h ?? 0,
+      candles: activeCandles.candles,
+      recentTrades: activeTrades?.trades ?? [],
       orderBook,
-      recentTrades: this.tradeHistory[symbol],
-      candles: [...symbolCandles],
+      fundingRate: null,
+      openInterest: null,
+      openInterestChange24h: null,
+      longShortRatio: null,
+      liquidations24h: null,
+      dataQuality,
+      appMode: this.appMode,
     };
-  }
-
-  private generateOrderBook(symbol: SymbolId, currentPrice: number): OrderBook {
-    const step = symbol === 'XRPUSDT' ? 0.0005 : currentPrice > 1000 ? 10 : 0.5;
-    const spread = step;
-    const spreadPercent = (spread / currentPrice) * 100;
-
-    const bids = [];
-    const asks = [];
-    let bidTotal = 0;
-    let askTotal = 0;
-
-    for (let i = 0; i < 10; i++) {
-      const bidPrice = Number((currentPrice - spread / 2 - i * step).toFixed(symbol === 'XRPUSDT' ? 4 : 2));
-      const askPrice = Number((currentPrice + spread / 2 + i * step).toFixed(symbol === 'XRPUSDT' ? 4 : 2));
-
-      const bidSize = Number(((Math.random() * (BASE_PRICES[symbol] > 1000 ? 1.5 : 150)) + 0.1).toFixed(2));
-      const askSize = Number(((Math.random() * (BASE_PRICES[symbol] > 1000 ? 1.5 : 150)) + 0.1).toFixed(2));
-
-      bidTotal += bidSize;
-      askTotal += askSize;
-
-      bids.push({ price: bidPrice, size: bidSize, total: Number(bidTotal.toFixed(2)) });
-      asks.push({ price: askPrice, size: askSize, total: Number(askTotal.toFixed(2)) });
-    }
-
-    const bidAskImbalance = (bidTotal - askTotal) / (bidTotal + askTotal);
-
-    return {
-      bids,
-      asks,
-      spread: Number(spread.toFixed(symbol === 'XRPUSDT' ? 4 : 2)),
-      spreadPercent: Number(spreadPercent.toFixed(4)),
-      bidAskImbalance: Number(bidAskImbalance.toFixed(3)),
-    };
-  }
-
-  public getCandles(symbol: SymbolId): Candle[] {
-    return [...this.candles[symbol]];
   }
 }
 
-// Global Singleton Instance
 export const marketEngine = new MarketEngine();

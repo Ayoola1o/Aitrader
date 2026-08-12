@@ -1,267 +1,248 @@
-import {
-  SymbolId,
-  Order,
-  Position,
-  TradeHistoryItem,
-  PortfolioState,
-  LLMDecision,
-} from '@/types/trading';
+import { SymbolId, Order, Position, TradeHistoryItem, PortfolioState } from '@/types/trading';
+
+const TAKER_FEE = 0.0005; // 0.05%
+const SLIPPAGE_PCT = 0.0002; // 0.02% per market order
 
 export class PaperBroker {
-  private balance: number = 10000;
-  private initialBalance: number = 10000;
+  private balance: number;
+  private initialBalance: number;
+  private positions: Map<string, Position> = new Map();
   private orders: Order[] = [];
-  private positions: Position[] = [];
   private tradeHistory: TradeHistoryItem[] = [];
-  private dailyStartEquity: number = 10000;
+  private dailyStartBalance: number;
+  private peakEquity: number;
+  private equityCurve: { time: number; equity: number }[] = [];
+  private totalFees: number = 0;
+  private orderCounter = 0;
 
-  constructor() {
-    // Demo initial closed trade history to give stats from the start
-    this.tradeHistory = [
-      {
-        id: 'trade-1',
-        symbol: 'BTCUSDT',
-        side: 'LONG',
-        entryPrice: 63100,
-        exitPrice: 64250,
-        size: 0.1,
-        realizedPnL: 115.0,
-        realizedPnLPercent: 1.82,
-        openedAt: Date.now() - 3600000 * 4,
-        closedAt: Date.now() - 3600000 * 2,
-        closeReason: 'TAKE_PROFIT',
-      },
-      {
-        id: 'trade-2',
-        symbol: 'ETHUSDT',
-        side: 'SHORT',
-        entryPrice: 3510,
-        exitPrice: 3465,
-        size: 1.5,
-        realizedPnL: 67.5,
-        realizedPnLPercent: 1.28,
-        openedAt: Date.now() - 3600000 * 12,
-        closedAt: Date.now() - 3600000 * 8,
-        closeReason: 'TAKE_PROFIT',
-      },
-    ];
-    this.balance = 10000 + 115.0 + 67.5;
-    this.dailyStartEquity = 10000;
+  constructor(startingBalance = 10000) {
+    this.balance = startingBalance;
+    this.initialBalance = startingBalance;
+    this.dailyStartBalance = startingBalance;
+    this.peakEquity = startingBalance;
+    this.equityCurve = [{ time: Date.now(), equity: startingBalance }];
   }
 
-  public getPortfolio(currentPrices: Record<SymbolId, number>): PortfolioState {
-    let unrealizedTotal = 0;
-    let marginUsed = 0;
-
-    // Update positions with live prices
-    this.positions.forEach((pos) => {
-      const livePrice = currentPrices[pos.symbol] || pos.entryPrice;
-      pos.currentPrice = livePrice;
-      const isLong = pos.side === 'LONG';
-      const priceDiff = isLong ? livePrice - pos.entryPrice : pos.entryPrice - livePrice;
-      pos.unrealizedPnL = Number((priceDiff * pos.size).toFixed(2));
-      pos.unrealizedPnLPercent = Number(((priceDiff / pos.entryPrice) * 100 * pos.leverage).toFixed(2));
-
-      unrealizedTotal += pos.unrealizedPnL;
-      marginUsed += (pos.entryPrice * pos.size) / pos.leverage;
-    });
-
-    const equity = Number((this.balance + unrealizedTotal).toFixed(2));
-    const freeMargin = Math.max(0, equity - marginUsed);
-    const totalPnL = Number((equity - this.initialBalance).toFixed(2));
-    const totalPnLPercent = Number(((totalPnL / this.initialBalance) * 100).toFixed(2));
-    const dailyPnL = Number((equity - this.dailyStartEquity).toFixed(2));
-    const dailyDrawdownPercent = dailyPnL < 0 ? Number((Math.abs(dailyPnL) / this.dailyStartEquity * 100).toFixed(2)) : 0;
-
-    const winning = this.tradeHistory.filter((t) => t.realizedPnL > 0);
-    const losing = this.tradeHistory.filter((t) => t.realizedPnL <= 0);
-    const totalTrades = this.tradeHistory.length;
-    const winRate = totalTrades > 0 ? Number(((winning.length / totalTrades) * 100).toFixed(1)) : 0;
-
-    const totalWinPnL = winning.reduce((a, b) => a + b.realizedPnL, 0);
-    const totalLossPnL = Math.abs(losing.reduce((a, b) => a + b.realizedPnL, 0));
-    const profitFactor = totalLossPnL > 0 ? Number((totalWinPnL / totalLossPnL).toFixed(2)) : totalWinPnL > 0 ? 3.5 : 0;
-    const sharpeRatio = totalTrades > 0 ? 1.84 : 0;
-
-    return {
-      balance: this.balance,
-      initialBalance: this.initialBalance,
-      equity,
-      marginUsed: Number(marginUsed.toFixed(2)),
-      freeMargin: Number(freeMargin.toFixed(2)),
-      totalPnL,
-      totalPnLPercent,
-      dailyPnL,
-      dailyDrawdownPercent,
-      maxDrawdownPercent: Math.max(dailyDrawdownPercent, 2.1),
-      winRate,
-      profitFactor,
-      sharpeRatio,
-      totalTrades,
-      winningTrades: winning.length,
-      losingTrades: losing.length,
-    };
+  setStartingBalance(amount: number) {
+    this.balance = amount;
+    this.initialBalance = amount;
+    this.dailyStartBalance = amount;
+    this.peakEquity = amount;
+    this.equityCurve = [{ time: Date.now(), equity: amount }];
+    this.positions.clear();
+    this.orders = [];
+    this.tradeHistory = [];
+    this.totalFees = 0;
   }
 
-  public executeOrderFromDecision(
+  // ── Submit Order ─────────────────────────────────────────────────────────
+  submitOrder(
     symbol: SymbolId,
-    decision: LLMDecision,
-    currentPrice: number
-  ): { success: boolean; message: string } {
-    if (decision.action !== 'BUY' && decision.action !== 'SELL') {
-      return { success: false, message: `Action ${decision.action} does not trigger an order.` };
+    side: 'BUY' | 'SELL',
+    size: number,
+    marketPrice: number,
+    stopLoss: number,
+    takeProfit: number,
+    source: 'AI' | 'MANUAL' = 'MANUAL',
+    decisionId?: string
+  ): { success: boolean; message: string; orderId?: string } {
+    if (size <= 0) return { success: false, message: 'Invalid position size' };
+    if (this.balance <= 0) return { success: false, message: 'Insufficient balance' };
+
+    // Apply market slippage
+    const slippage = marketPrice * SLIPPAGE_PCT;
+    const fillPrice = side === 'BUY'
+      ? Number((marketPrice + slippage).toFixed(marketPrice > 100 ? 2 : 5))
+      : Number((marketPrice - slippage).toFixed(marketPrice > 100 ? 2 : 5));
+
+    const fee = fillPrice * size * TAKER_FEE;
+    const positionValue = fillPrice * size;
+
+    if (positionValue + fee > this.balance) {
+      return { success: false, message: `Insufficient balance: need $${(positionValue + fee).toFixed(2)}, have $${this.balance.toFixed(2)}` };
     }
 
-    // Check existing position
-    const existing = this.positions.find((p) => p.symbol === symbol);
-    if (existing) {
-      return { success: false, message: `Active position already open for ${symbol}.` };
-    }
+    this.orderCounter++;
+    const orderId = `PAPER-${Date.now()}-${this.orderCounter}`;
+    const order: Order = {
+      id: orderId, decisionId, timestamp: Date.now(), symbol,
+      side, type: 'MARKET', price: fillPrice, size,
+      stopPrice: stopLoss, takeProfitPrice: takeProfit,
+      status: 'FILLED', filledPrice: fillPrice,
+      slippage, fee, source,
+    };
+    this.orders.push(order);
 
-    const side = decision.action === 'BUY' ? 'LONG' : 'SHORT';
-    const riskAmount = (this.balance * (decision.riskPercent / 100));
-    const stopDistance = decision.stopLoss ? Math.abs(currentPrice - decision.stopLoss) : currentPrice * 0.015;
-    const size = Number((riskAmount / stopDistance).toFixed(symbol === 'XRPUSDT' ? 1 : 3));
+    // Deduct cost
+    this.balance -= (positionValue + fee);
+    this.totalFees += fee;
 
-    const slippage = currentPrice * (0.0001 + Math.random() * 0.0002);
-    const filledPrice = side === 'LONG' ? currentPrice + slippage : currentPrice - slippage;
-    const fee = (filledPrice * size) * 0.0004; // 0.04% fee
-
-    const stopLoss = decision.stopLoss || (side === 'LONG' ? filledPrice * 0.985 : filledPrice * 1.015);
-    const takeProfit = decision.takeProfit || (side === 'LONG' ? filledPrice * 1.035 : filledPrice * 0.965);
-
-    const newPosition: Position = {
-      id: 'pos-' + Date.now(),
-      symbol,
-      side,
-      entryPrice: Number(filledPrice.toFixed(symbol === 'XRPUSDT' ? 4 : 2)),
-      currentPrice: Number(filledPrice.toFixed(symbol === 'XRPUSDT' ? 4 : 2)),
-      size,
-      leverage: 5,
-      stopLoss: Number(stopLoss.toFixed(symbol === 'XRPUSDT' ? 4 : 2)),
-      takeProfit: Number(takeProfit.toFixed(symbol === 'XRPUSDT' ? 4 : 2)),
-      unrealizedPnL: 0,
-      unrealizedPnLPercent: 0,
-      liquidationPrice: Number((side === 'LONG' ? filledPrice * 0.82 : filledPrice * 1.18).toFixed(2)),
+    const positionId = `${symbol}-${orderId}`;
+    const position: Position = {
+      id: positionId, decisionId, symbol,
+      side: side === 'BUY' ? 'LONG' : 'SHORT',
+      entryPrice: fillPrice,
+      currentPrice: fillPrice,
+      size, leverage: 1,
+      stopLoss, takeProfit,
+      unrealizedPnL: 0, unrealizedPnLPercent: 0,
+      liquidationPrice: side === 'BUY' ? fillPrice * 0.5 : fillPrice * 1.5,
       openedAt: Date.now(),
+      riskR: 0,
     };
+    this.positions.set(positionId, position);
 
-    this.positions.push(newPosition);
-    this.balance -= fee;
-
-    const orderRecord: Order = {
-      id: 'ord-' + Date.now(),
-      timestamp: Date.now(),
-      symbol,
-      side: decision.action,
-      type: 'MARKET',
-      price: currentPrice,
-      size,
-      status: 'FILLED',
-      filledPrice: newPosition.entryPrice,
-      slippage: Number(slippage.toFixed(4)),
-      fee: Number(fee.toFixed(2)),
-    };
-
-    this.orders.unshift(orderRecord);
-
-    return {
-      success: true,
-      message: `Executed Paper ${decision.action} order for ${size} ${symbol} @ $${newPosition.entryPrice}`,
-    };
+    return { success: true, message: `Filled @ $${fillPrice} (slippage: $${slippage.toFixed(4)}, fee: $${fee.toFixed(4)})`, orderId: positionId };
   }
 
-  public updateAndCheckTriggers(currentPrices: Record<SymbolId, number>) {
-    const remainingPositions: Position[] = [];
+  // ── Close Position ────────────────────────────────────────────────────────
+  closePosition(
+    positionId: string,
+    marketPrice: number,
+    reason: TradeHistoryItem['closeReason'] = 'MANUAL'
+  ): { success: boolean; pnl?: number; message?: string } {
+    const pos = this.positions.get(positionId);
+    if (!pos) return { success: false, message: 'Position not found' };
 
-    for (const pos of this.positions) {
-      const price = currentPrices[pos.symbol] || pos.entryPrice;
-      let closedReason: TradeHistoryItem['closeReason'] | null = null;
-      let exitPrice = price;
+    // Simulate slippage on close
+    const slippage = marketPrice * SLIPPAGE_PCT;
+    const exitPrice = pos.side === 'LONG'
+      ? Number((marketPrice - slippage).toFixed(marketPrice > 100 ? 2 : 5))
+      : Number((marketPrice + slippage).toFixed(marketPrice > 100 ? 2 : 5));
 
-      if (pos.side === 'LONG') {
-        if (price <= pos.stopLoss) {
-          closedReason = 'STOP_LOSS';
-          exitPrice = pos.stopLoss;
-        } else if (price >= pos.takeProfit) {
-          closedReason = 'TAKE_PROFIT';
-          exitPrice = pos.takeProfit;
-        }
-      } else {
-        if (price >= pos.stopLoss) {
-          closedReason = 'STOP_LOSS';
-          exitPrice = pos.stopLoss;
-        } else if (price <= pos.takeProfit) {
-          closedReason = 'TAKE_PROFIT';
-          exitPrice = pos.takeProfit;
-        }
-      }
+    const fee = exitPrice * pos.size * TAKER_FEE;
+    const priceDiff = pos.side === 'LONG'
+      ? exitPrice - pos.entryPrice
+      : pos.entryPrice - exitPrice;
 
-      if (closedReason) {
-        const pnl = pos.side === 'LONG' ? (exitPrice - pos.entryPrice) * pos.size : (pos.entryPrice - exitPrice) * pos.size;
-        const pnlPct = (pnl / (pos.entryPrice * pos.size / pos.leverage)) * 100;
+    const grossPnL = priceDiff * pos.size;
+    const netPnL = grossPnL - fee;
+    const pnlPercent = (netPnL / (pos.entryPrice * pos.size)) * 100;
 
-        this.balance += pnl;
+    // Initial risk for R multiple
+    const initialRisk = Math.abs(pos.entryPrice - pos.stopLoss) * pos.size;
+    const rMultiple = initialRisk > 0 ? netPnL / initialRisk : 0;
 
-        this.tradeHistory.unshift({
-          id: 'trade-' + Date.now(),
-          symbol: pos.symbol,
-          side: pos.side,
-          entryPrice: pos.entryPrice,
-          exitPrice,
-          size: pos.size,
-          realizedPnL: Number(pnl.toFixed(2)),
-          realizedPnLPercent: Number(pnlPct.toFixed(2)),
-          openedAt: pos.openedAt,
-          closedAt: Date.now(),
-          closeReason: closedReason,
-        });
-      } else {
-        remainingPositions.push(pos);
-      }
-    }
+    this.balance += pos.entryPrice * pos.size + netPnL;
+    this.totalFees += fee;
 
-    this.positions = remainingPositions;
-  }
-
-  public closePosition(id: string, currentPrices: Record<SymbolId, number>) {
-    const pos = this.positions.find((p) => p.id === id);
-    if (!pos) return;
-
-    const exitPrice = currentPrices[pos.symbol] || pos.currentPrice;
-    const pnl = pos.side === 'LONG' ? (exitPrice - pos.entryPrice) * pos.size : (pos.entryPrice - exitPrice) * pos.size;
-    const pnlPct = (pnl / (pos.entryPrice * pos.size / pos.leverage)) * 100;
-
-    this.balance += pnl;
-
-    this.tradeHistory.unshift({
-      id: 'trade-' + Date.now(),
+    this.tradeHistory.push({
+      id: `TRADE-${Date.now()}`,
+      decisionId: pos.decisionId,
       symbol: pos.symbol,
       side: pos.side,
       entryPrice: pos.entryPrice,
       exitPrice,
       size: pos.size,
-      realizedPnL: Number(pnl.toFixed(2)),
-      realizedPnLPercent: Number(pnlPct.toFixed(2)),
+      realizedPnL: Number(netPnL.toFixed(2)),
+      realizedPnLPercent: Number(pnlPercent.toFixed(3)),
+      fee: Number(fee.toFixed(4)),
+      slippage: Number(slippage.toFixed(4)),
       openedAt: pos.openedAt,
       closedAt: Date.now(),
-      closeReason: 'MANUAL',
+      closeReason: reason,
+      rMultiple: Number(rMultiple.toFixed(2)),
     });
 
-    this.positions = this.positions.filter((p) => p.id !== id);
+    this.positions.delete(positionId);
+    this.equityCurve.push({ time: Date.now(), equity: this.getEquity(marketPrice) });
+    return { success: true, pnl: Number(netPnL.toFixed(2)) };
   }
 
-  public getPositions(): Position[] {
-    return this.positions;
+  // ── Update Positions with Current Prices ─────────────────────────────────
+  updatePrices(prices: Record<SymbolId, number>) {
+    for (const [id, pos] of this.positions) {
+      const price = prices[pos.symbol];
+      if (!price) continue;
+      pos.currentPrice = price;
+      const priceDiff = pos.side === 'LONG' ? price - pos.entryPrice : pos.entryPrice - price;
+      pos.unrealizedPnL = Number((priceDiff * pos.size).toFixed(2));
+      pos.unrealizedPnLPercent = Number(((priceDiff / pos.entryPrice) * 100).toFixed(3));
+      const initialRisk = Math.abs(pos.entryPrice - pos.stopLoss) * pos.size;
+      pos.riskR = initialRisk > 0 ? pos.unrealizedPnL / initialRisk : 0;
+
+      // Check stop loss / take profit (with simulated slippage on fill)
+      const slippage = price * SLIPPAGE_PCT;
+      const stopHit = pos.side === 'LONG' ? price <= pos.stopLoss + slippage : price >= pos.stopLoss - slippage;
+      const tpHit = pos.side === 'LONG' ? price >= pos.takeProfit - slippage : price <= pos.takeProfit + slippage;
+
+      if (tpHit) {
+        this.closePosition(id, price, 'TAKE_PROFIT');
+      } else if (stopHit) {
+        this.closePosition(id, price, 'STOP_LOSS');
+      }
+    }
   }
 
-  public getOrders(): Order[] {
-    return this.orders;
+  // ── Portfolio State ───────────────────────────────────────────────────────
+  getEquity(currentPrice: number): number {
+    const unrealizedTotal = Array.from(this.positions.values())
+      .reduce((s, p) => s + p.unrealizedPnL, 0);
+    return this.balance + unrealizedTotal;
   }
 
-  public getTradeHistory(): TradeHistoryItem[] {
-    return this.tradeHistory;
+  getPortfolioState(currentPrice: number): PortfolioState {
+    const equity = this.getEquity(currentPrice);
+    const unrealizedPnL = Array.from(this.positions.values())
+      .reduce((s, p) => s + p.unrealizedPnL, 0);
+    const marginUsed = Array.from(this.positions.values())
+      .reduce((s, p) => s + p.entryPrice * p.size, 0);
+    const freeMargin = this.balance;
+
+    const totalPnL = equity - this.initialBalance;
+    const totalPnLPercent = this.initialBalance > 0 ? (totalPnL / this.initialBalance) * 100 : 0;
+    const dailyPnL = equity - this.dailyStartBalance;
+    const dailyDrawdownPercent = this.dailyStartBalance > 0
+      ? Math.max(0, (this.dailyStartBalance - equity) / this.dailyStartBalance * 100) : 0;
+
+    if (equity > this.peakEquity) this.peakEquity = equity;
+    const maxDrawdownPercent = this.peakEquity > 0
+      ? Math.max(0, (this.peakEquity - equity) / this.peakEquity * 100) : 0;
+
+    const wins = this.tradeHistory.filter(t => t.realizedPnL > 0);
+    const losses = this.tradeHistory.filter(t => t.realizedPnL <= 0);
+    const totalTrades = this.tradeHistory.length;
+    const winRate = totalTrades > 0 ? (wins.length / totalTrades) * 100 : 0;
+    const grossProfit = wins.reduce((s, t) => s + t.realizedPnL, 0);
+    const grossLoss = Math.abs(losses.reduce((s, t) => s + t.realizedPnL, 0));
+    const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : wins.length > 0 ? 99 : 0;
+
+    // Simplified Sharpe (annualized, requires at least 5 trades)
+    let sharpeRatio = 0;
+    if (totalTrades >= 5) {
+      const returns = this.tradeHistory.map(t => t.realizedPnLPercent / 100);
+      const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+      const variance = returns.reduce((s, r) => s + (r - mean) ** 2, 0) / returns.length;
+      const std = Math.sqrt(variance);
+      sharpeRatio = std > 0 ? Number(((mean / std) * Math.sqrt(252)).toFixed(2)) : 0;
+    }
+
+    return {
+      balance: Number(this.balance.toFixed(2)),
+      initialBalance: this.initialBalance,
+      equity: Number(equity.toFixed(2)),
+      marginUsed: Number(marginUsed.toFixed(2)),
+      freeMargin: Number(freeMargin.toFixed(2)),
+      unrealizedPnL: Number(unrealizedPnL.toFixed(2)),
+      totalPnL: Number(totalPnL.toFixed(2)),
+      totalPnLPercent: Number(totalPnLPercent.toFixed(3)),
+      dailyPnL: Number(dailyPnL.toFixed(2)),
+      dailyDrawdownPercent: Number(dailyDrawdownPercent.toFixed(3)),
+      maxDrawdownPercent: Number(maxDrawdownPercent.toFixed(3)),
+      totalFees: Number(this.totalFees.toFixed(4)),
+      winRate: Number(winRate.toFixed(1)),
+      profitFactor: Number(profitFactor.toFixed(2)),
+      sharpeRatio,
+      totalTrades,
+      winningTrades: wins.length,
+      losingTrades: losses.length,
+      equityCurve: this.equityCurve.slice(-200),
+    };
   }
+
+  getPositions(): Position[] { return Array.from(this.positions.values()); }
+  getOrders(): Order[] { return this.orders.slice(-100); }
+  getTradeHistory(): TradeHistoryItem[] { return this.tradeHistory; }
 }
 
-export const paperBroker = new PaperBroker();
+export const paperBroker = new PaperBroker(10000);

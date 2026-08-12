@@ -4,14 +4,38 @@ export type TimeFrame = '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
 
 export type ActionType = 'BUY' | 'SELL' | 'HOLD' | 'NO_TRADE';
 
-export type RegimeType = 
-  | 'TRENDING_UP' 
-  | 'TRENDING_DOWN' 
-  | 'RANGING' 
-  | 'HIGH_VOLATILITY' 
-  | 'LOW_VOLATILITY' 
-  | 'BREAKOUT' 
-  | 'TRANSITION';
+export type AppMode = 'DEMO' | 'PAPER' | 'REPLAY';
+
+export type DataStatus =
+  | 'LIVE'
+  | 'DELAYED'
+  | 'HISTORICAL'
+  | 'SIMULATED'
+  | 'UNAVAILABLE'
+  | 'STALE';
+
+export interface DataQuality {
+  tickerStatus: DataStatus;
+  orderBookStatus: DataStatus;
+  tradesStatus: DataStatus;
+  candlesStatus: DataStatus;
+  fundingStatus: DataStatus;
+  openInterestStatus: DataStatus;
+  macroStatus: DataStatus;
+  overallScore: number; // 0-100
+  criticalStale: boolean;
+  lastUpdated: number;
+}
+
+export type RegimeType =
+  | 'TRENDING_UP'
+  | 'TRENDING_DOWN'
+  | 'RANGING'
+  | 'HIGH_VOLATILITY'
+  | 'LOW_VOLATILITY'
+  | 'BREAKOUT'
+  | 'TRANSITION'
+  | 'UNKNOWN';
 
 export interface Candle {
   time: number;
@@ -33,7 +57,10 @@ export interface OrderBook {
   asks: OrderBookLevel[];
   spread: number;
   spreadPercent: number;
-  bidAskImbalance: number; // -1 (full sell imbalance) to +1 (full buy imbalance)
+  bidAskImbalance: number; // -1 (full sell) to +1 (full buy)
+  bidDepth: number;
+  askDepth: number;
+  midPrice: number;
 }
 
 export interface TradeTick {
@@ -41,75 +68,95 @@ export interface TradeTick {
   time: number;
   price: number;
   size: number;
-  side: 'BUY' | 'SELL';
+  side: 'BUY' | 'SELL' | 'UNKNOWN';
 }
 
 export interface MarketSnapshot {
   symbol: SymbolId;
+  exchange: string;
+  timestamp: number;
+  // Prices
   price: number;
+  bid: number;
+  ask: number;
+  spread: number;
   change24h: number;
   high24h: number;
   low24h: number;
   volume24h: number;
-  fundingRate: number;
-  openInterest: number;
-  openInterestChange24h: number;
-  longShortRatio: number;
-  liquidations24h: { longs: number; shorts: number };
-  orderBook: OrderBook;
-  recentTrades: TradeTick[];
+  // Data collections
   candles: Candle[];
+  recentTrades: TradeTick[];
+  orderBook: OrderBook;
+  // Optional derivatives (may be UNAVAILABLE)
+  fundingRate: number | null;
+  openInterest: number | null;
+  openInterestChange24h: number | null;
+  longShortRatio: number | null;
+  liquidations24h: { longs: number; shorts: number } | null;
+  // Data quality metadata
+  dataQuality: DataQuality;
+  appMode: AppMode;
 }
 
 export interface FeatureVector {
-  // Technical
+  // Technical — standard formulas
   ema20: number;
   ema50: number;
   ema200: number;
   rsi: number;
   adx: number;
   vwap: number;
+  atr: number;
+  macd: number;
+  macdSignal: number;
+  bollingerUpper: number;
+  bollingerLower: number;
+  bollingerExpansion: boolean;
   supportLevel: number;
   resistanceLevel: number;
-  
   // Momentum
-  roc: number; // Rate of change
-  ppo: number; // Percentage Price Oscillator
+  roc: number;
+  ppo: number;
+  volumeZScore: number;
   volumeAcceleration: number;
   momentumDivergence: boolean;
-  
   // Volatility
-  atr: number;
   realizedVol: number;
-  volPercentile: number;
-  bollingerExpansion: boolean;
-  
+  volPercentile: number; // proper rank-based
   // Liquidity
   spread: number;
+  spreadPercent: number;
+  bidAskImbalance: number;
   liquidityScore: number;
   slippageRisk: 'LOW' | 'MEDIUM' | 'HIGH';
   sweepDetected: boolean;
-  
-  // Positioning
+  // Positioning (from real data if available)
   fundingDivergence: boolean;
   crowdedPositioning: 'NONE' | 'LONG' | 'SHORT';
-  
-  // Macro
-  dxyIndex: number;
-  vixProxy: number;
-  macroRisk: 'LOW' | 'MEDIUM' | 'HIGH';
-  minutesToNextEvent: number;
-  newsImpactScore: number;
+  // Macro — explicitly UNAVAILABLE if no source
+  macroAvailable: boolean;
+}
+
+export interface Evidence {
+  label: string;
+  value: string | number;
+  signal: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
 }
 
 export interface AgentSignal {
   agentId: string;
   agentName: string;
-  bias: 'BULLISH' | 'BEARISH' | 'NEUTRAL' | 'CAUTION';
-  score: number; // 0 to 1
-  confidence: number; // 0 to 1
+  action: ActionType;
+  bias: 'BULLISH' | 'BEARISH' | 'NEUTRAL' | 'CAUTION' | 'UNAVAILABLE';
+  score: number;
+  confidence: number;
   summary: string;
+  evidence: Evidence[];
+  risks: string[];
   keyMetrics: Record<string, string | number>;
+  dataQuality: DataStatus;
+  timestamp: number;
 }
 
 export interface SignalFusionResult {
@@ -131,10 +178,13 @@ export interface LLMDecision {
   stopLoss: number | null;
   takeProfit: number | null;
   riskPercent: number;
+  positionSize?: number;
+  riskReward?: number;
   reasoning: string[];
   invalidation: string[];
   timeHorizon: 'SCALP' | 'INTRADAY' | 'SWING';
   regime: RegimeType;
+  decisionId?: string;
 }
 
 export interface RiskCheckResult {
@@ -142,13 +192,15 @@ export interface RiskCheckResult {
   failedGates: string[];
   warnings: string[];
   maxAllowedPositionSize: number;
+  calculatedPositionSize: number;
   riskRewardRatio: number;
   dailyDrawdownPercent: number;
   newsKillSwitchActive: boolean;
+  dataQualityBlock: boolean;
 }
 
 export interface DecisionRecord {
-  id: string;
+  decisionId: string;
   timestamp: number;
   symbol: SymbolId;
   price: number;
@@ -159,10 +211,13 @@ export interface DecisionRecord {
   riskCheck: RiskCheckResult;
   executed: boolean;
   orderId?: string;
+  outcome?: 'WIN' | 'LOSS' | 'BREAKEVEN' | 'PENDING';
+  realizedPnL?: number;
 }
 
 export interface Order {
   id: string;
+  decisionId?: string;
   timestamp: number;
   symbol: SymbolId;
   side: 'BUY' | 'SELL';
@@ -171,14 +226,16 @@ export interface Order {
   size: number;
   stopPrice?: number;
   takeProfitPrice?: number;
-  status: 'PENDING' | 'FILLED' | 'CANCELLED' | 'REJECTED';
+  status: 'PENDING' | 'FILLED' | 'PARTIALLY_FILLED' | 'CANCELLED' | 'REJECTED';
   filledPrice?: number;
   slippage?: number;
   fee?: number;
+  source: 'AI' | 'MANUAL';
 }
 
 export interface Position {
   id: string;
+  decisionId?: string;
   symbol: SymbolId;
   side: 'LONG' | 'SHORT';
   entryPrice: number;
@@ -191,10 +248,12 @@ export interface Position {
   unrealizedPnLPercent: number;
   liquidationPrice: number;
   openedAt: number;
+  riskR: number; // current position in R units
 }
 
 export interface TradeHistoryItem {
   id: string;
+  decisionId?: string;
   symbol: SymbolId;
   side: 'LONG' | 'SHORT';
   entryPrice: number;
@@ -202,9 +261,12 @@ export interface TradeHistoryItem {
   size: number;
   realizedPnL: number;
   realizedPnLPercent: number;
+  fee: number;
+  slippage: number;
   openedAt: number;
   closedAt: number;
   closeReason: 'TAKE_PROFIT' | 'STOP_LOSS' | 'MANUAL' | 'LIQUIDATION' | 'HARD_GATE';
+  rMultiple: number; // profit in units of initial risk
 }
 
 export interface PortfolioState {
@@ -213,24 +275,28 @@ export interface PortfolioState {
   equity: number;
   marginUsed: number;
   freeMargin: number;
+  unrealizedPnL: number;
   totalPnL: number;
   totalPnLPercent: number;
   dailyPnL: number;
   dailyDrawdownPercent: number;
   maxDrawdownPercent: number;
+  totalFees: number;
   winRate: number;
   profitFactor: number;
   sharpeRatio: number;
   totalTrades: number;
   winningTrades: number;
   losingTrades: number;
+  equityCurve: { time: number; equity: number }[];
 }
 
 export interface AgentPerformanceMetric {
   agentId: string;
   agentName: string;
-  accuracy: number; // 0..1
-  contribution: number; // e.g. +12%
+  accuracy: number;
+  contribution: number;
   signalsGenerated: number;
   successfulSignals: number;
+  noTradeSignals: number;
 }

@@ -1,87 +1,111 @@
-import { LLMDecision, MarketSnapshot, FeatureVector, RiskCheckResult, PortfolioState } from '@/types/trading';
+import { LLMDecision, RiskCheckResult, PortfolioState, MarketSnapshot, FeatureVector } from '@/types/trading';
+
+interface RiskConfig {
+  maxPositionRiskPercent: number; // e.g. 0.5 = 0.5%
+  maxDailyDrawdownPercent: number;
+  minRiskReward: number;
+  maxSpreadPercent: number;
+  newsKillSwitch: boolean;
+}
+
+const DEFAULT_RISK: RiskConfig = {
+  maxPositionRiskPercent: 0.5,
+  maxDailyDrawdownPercent: 5.0,
+  minRiskReward: 2.0,
+  maxSpreadPercent: 0.3, // 0.3% max spread
+  newsKillSwitch: false,
+};
 
 export class DeterministicRiskEngine {
-  private maxAllowedPositionPercent = 2.0; // 2% max per trade
-  private maxDailyDrawdownPercent = 5.0; // 5% daily loss limit
-  private minRiskRewardRatio = 2.0; // 2:1 minimum R:R
-  private maxAllowedSpreadPercent = 0.05; // 0.05% max spread
+  private config: RiskConfig = { ...DEFAULT_RISK };
 
-  public evaluateRisk(
+  setConfig(config: Partial<RiskConfig>) {
+    this.config = { ...this.config, ...config };
+  }
+
+  evaluate(
     decision: LLMDecision,
+    portfolio: PortfolioState,
     snapshot: MarketSnapshot,
-    features: FeatureVector,
-    portfolio: PortfolioState
+    features: FeatureVector
   ): RiskCheckResult {
     const failedGates: string[] = [];
     const warnings: string[] = [];
 
-    // If decision is HOLD or NO_TRADE, no order placement needed
-    if (decision.action === 'HOLD' || decision.action === 'BUY' === false && decision.action === 'SELL' === false) {
-      return {
-        approved: false,
-        failedGates: [],
-        warnings: ['Action is HOLD or NO_TRADE'],
-        maxAllowedPositionSize: 0,
-        riskRewardRatio: 0,
-        dailyDrawdownPercent: portfolio.dailyDrawdownPercent,
-        newsKillSwitchActive: false,
-      };
+    // Gate 1: Data quality — fail-closed on stale data in PAPER mode
+    const dataQualityBlock = snapshot.dataQuality.criticalStale && snapshot.appMode === 'PAPER';
+    if (dataQualityBlock) {
+      failedGates.push('DATA_QUALITY: Critical market data is stale — NO_TRADE');
     }
 
-    // 1. Daily Drawdown Limit
-    if (portfolio.dailyDrawdownPercent >= this.maxDailyDrawdownPercent) {
-      failedGates.push(`Daily drawdown limit exceeded (${portfolio.dailyDrawdownPercent.toFixed(2)}% >= ${this.maxDailyDrawdownPercent}%).`);
+    // Gate 2: Daily drawdown limit
+    const dailyDrawdown = portfolio.dailyDrawdownPercent;
+    if (dailyDrawdown >= this.config.maxDailyDrawdownPercent) {
+      failedGates.push(`DAILY_DRAWDOWN: ${dailyDrawdown.toFixed(2)}% >= limit ${this.config.maxDailyDrawdownPercent}%`);
     }
 
-    // 2. Risk:Reward Ratio Gate
-    let rrRatio = 0;
-    if (decision.entry && decision.stopLoss && decision.takeProfit) {
-      const risk = Math.abs(decision.entry - decision.stopLoss);
-      const reward = Math.abs(decision.takeProfit - decision.entry);
-      rrRatio = risk > 0 ? reward / risk : 0;
+    // Gate 3: Total drawdown
+    if (portfolio.maxDrawdownPercent >= this.config.maxDailyDrawdownPercent * 2) {
+      failedGates.push(`MAX_DRAWDOWN: ${portfolio.maxDrawdownPercent.toFixed(2)}% exceeded`);
+    }
 
-      if (rrRatio < this.minRiskRewardRatio) {
-        failedGates.push(`Risk:Reward ratio (${rrRatio.toFixed(2)}) is below mandatory minimum (${this.minRiskRewardRatio}).`);
+    // Gate 4: Spread too wide
+    if (features.spreadPercent * 100 > this.config.maxSpreadPercent) {
+      failedGates.push(`SPREAD: ${(features.spreadPercent * 100).toFixed(4)}% > max ${this.config.maxSpreadPercent}%`);
+    }
+
+    // Gate 5: Minimum R:R
+    const rr = decision.riskReward ?? 0;
+    if (decision.action !== 'NO_TRADE' && decision.action !== 'HOLD' && rr < this.config.minRiskReward && decision.stopLoss !== null) {
+      failedGates.push(`RISK_REWARD: ${rr.toFixed(2)} < minimum ${this.config.minRiskReward}`);
+    }
+
+    // Gate 6: Stop loss required
+    if ((decision.action === 'BUY' || decision.action === 'SELL') && decision.stopLoss === null) {
+      failedGates.push('NO_STOP_LOSS: Trade requires a stop loss');
+    }
+
+    // Gate 7: News kill switch
+    if (this.config.newsKillSwitch) {
+      warnings.push('NEWS_KILL_SWITCH: Active — verify no major macro release');
+    }
+
+    // Risk-based position sizing
+    const price = snapshot.price;
+    const stopLoss = decision.stopLoss;
+    const equity = portfolio.equity;
+    let calculatedPositionSize = 0;
+    let maxAllowedPositionSize = 0;
+
+    if (stopLoss !== null && price > 0) {
+      const stopDistance = Math.abs(price - stopLoss);
+      const riskAmount = (equity * (this.config.maxPositionRiskPercent / 100));
+      calculatedPositionSize = stopDistance > 0 ? Number((riskAmount / stopDistance).toFixed(6)) : 0;
+      maxAllowedPositionSize = calculatedPositionSize;
+    }
+
+    // Gate 8: Minimum viable size
+    if (calculatedPositionSize > 0 && price > 0) {
+      const positionValue = calculatedPositionSize * price;
+      if (positionValue > portfolio.freeMargin) {
+        failedGates.push(`MARGIN: Position value $${positionValue.toFixed(2)} exceeds free margin $${portfolio.freeMargin.toFixed(2)}`);
       }
-    } else {
-      failedGates.push('Missing Entry, Stop Loss, or Take Profit target prices.');
     }
 
-    // 3. Position Size Gate
-    if (decision.riskPercent > this.maxAllowedPositionPercent) {
-      failedGates.push(`Requested risk size (${decision.riskPercent}%) exceeds maximum limit (${this.maxAllowedPositionPercent}%).`);
+    if (features.slippageRisk === 'HIGH') {
+      warnings.push('HIGH_SLIPPAGE: Execution cost may erode expected edge');
     }
-
-    // 4. Spread & Liquidity Gate
-    const spreadPct = snapshot.orderBook.spreadPercent;
-    if (spreadPct > this.maxAllowedSpreadPercent) {
-      failedGates.push(`Market spread (${spreadPct.toFixed(3)}%) exceeds acceptable limit (${this.maxAllowedSpreadPercent}%).`);
-    }
-
-    // 5. News Event Kill Switch
-    const newsKillSwitchActive = features.minutesToNextEvent <= 15;
-    if (newsKillSwitchActive) {
-      failedGates.push(`News Kill Switch Active: High-impact economic event scheduled within ${features.minutesToNextEvent} minutes.`);
-    }
-
-    // 6. Volatility & Crowding Warning
-    if (features.volPercentile > 0.90) {
-      warnings.push(`Extremely high realized volatility (${(features.volPercentile * 100).toFixed(0)}th percentile).`);
-    }
-    if (features.crowdedPositioning !== 'NONE') {
-      warnings.push(`Crowded ${features.crowdedPositioning} positioning detected.`);
-    }
-
-    const approved = failedGates.length === 0;
 
     return {
-      approved,
+      approved: failedGates.length === 0 && decision.action !== 'NO_TRADE' && decision.action !== 'HOLD',
       failedGates,
       warnings,
-      maxAllowedPositionSize: this.maxAllowedPositionPercent,
-      riskRewardRatio: Number(rrRatio.toFixed(2)),
-      dailyDrawdownPercent: portfolio.dailyDrawdownPercent,
-      newsKillSwitchActive,
+      maxAllowedPositionSize,
+      calculatedPositionSize,
+      riskRewardRatio: rr,
+      dailyDrawdownPercent: dailyDrawdown,
+      newsKillSwitchActive: this.config.newsKillSwitch,
+      dataQualityBlock,
     };
   }
 }

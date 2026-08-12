@@ -1,76 +1,116 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Settings, Shield, Cpu, Check, Download, Wifi, Key, Database } from 'lucide-react';
+import { Settings, Shield, Cpu, Check, Download, Wifi, Key, Database, DollarSign } from 'lucide-react';
 import { aiProviderManager, AIProviderId } from '@/lib/llm/providers';
 import { dbPersistence } from '@/lib/db/schema';
 import { paperBroker } from '@/lib/broker/paper';
 import { alpacaBrokerClient } from '@/lib/broker/alpaca';
+import { AppMode } from '@/types/trading';
+import { deterministicRiskEngine } from '@/lib/risk/engine';
 
-export const SettingsView: React.FC = () => {
+interface SettingsViewProps {
+  onModeChange?: (mode: AppMode) => void;
+  onCredentialsChange?: () => void;
+}
+
+export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCredentialsChange }) => {
   const [tradingMode, setTradingMode] = useState<'PAPER' | 'SHADOW' | 'LIVE'>('PAPER');
-  const [maxRisk, setMaxRisk] = useState<number>(2.0);
+  const [maxRisk, setMaxRisk] = useState<number>(0.5);
   const [maxDrawdown, setMaxDrawdown] = useState<number>(5.0);
   const [minRR, setMinRR] = useState<number>(2.0);
-  const [killSwitch, setKillSwitch] = useState<boolean>(true);
-  const [confidenceThreshold, setConfidenceThreshold] = useState<number>(84);
-  const [useLiveWebSocket, setUseLiveWebSocket] = useState<boolean>(true);
+  const [killSwitch, setKillSwitch] = useState<boolean>(false);
+  const [confidenceThreshold, setConfidenceThreshold] = useState<number>(68);
+  const [startingBalance, setStartingBalance] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      return parseFloat(localStorage.getItem('aitrader_starting_balance') ?? '10000');
+    }
+    return 10000;
+  });
+  const [takerFee, setTakerFee] = useState<number>(0.05);
+  const [slippagePct, setSlippagePct] = useState<number>(0.02);
 
-  // Alpaca Credentials
-  const [alpacaApiKey, setAlpacaApiKey] = useState<string>('');
-  const [alpacaSecretKey, setAlpacaSecretKey] = useState<string>('');
-  const [useAlpacaBroker, setUseAlpacaBroker] = useState<boolean>(false);
+  // Synchronous initializers from localStorage
+  const [alpacaApiKey, setAlpacaApiKey] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('aitrader_alpaca_api_key') || '';
+    }
+    return '';
+  });
+
+  const [alpacaSecretKey, setAlpacaSecretKey] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('aitrader_alpaca_secret_key') || '';
+    }
+    return '';
+  });
+
+  const [useAlpacaBroker, setUseAlpacaBroker] = useState<boolean>(() => {
+    return !!(alpacaApiKey && alpacaSecretKey);
+  });
+
   const [alpacaStatus, setAlpacaStatus] = useState<string | null>(null);
 
-  // AI Provider Credentials
-  const [aiProvider, setAiProvider] = useState<AIProviderId>('mock');
-  const [apiKey, setApiKey] = useState<string>('');
+  const [aiProvider, setAiProvider] = useState<AIProviderId>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('aitrader_ai_provider') as AIProviderId) || 'mock';
+    }
+    return 'mock';
+  });
+
+  const [apiKey, setApiKey] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('aitrader_ai_api_key') || '';
+    }
+    return '';
+  });
+
   const [saved, setSaved] = useState<boolean>(false);
 
-  // Load persistent credentials on mount
+  // Initial connection test on mount if keys exist
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedAlpacaKey = localStorage.getItem('aitrader_alpaca_api_key') || '';
-      const savedAlpacaSecret = localStorage.getItem('aitrader_alpaca_secret_key') || '';
-      const savedAiProvider = (localStorage.getItem('aitrader_ai_provider') as AIProviderId) || 'mock';
-      const savedAiKey = localStorage.getItem('aitrader_ai_api_key') || '';
-
-      if (savedAlpacaKey) setAlpacaApiKey(savedAlpacaKey);
-      if (savedAlpacaSecret) setAlpacaSecretKey(savedAlpacaSecret);
-      if (savedAiProvider) setAiProvider(savedAiProvider);
-      if (savedAiKey) setApiKey(savedAiKey);
-
-      if (savedAlpacaKey && savedAlpacaSecret) {
-        alpacaBrokerClient.setCredentials({
-          apiKeyId: savedAlpacaKey,
-          secretKey: savedAlpacaSecret,
-          isPaper: true,
-        });
-        setUseAlpacaBroker(true);
-        setAlpacaStatus('Alpaca Paper Credentials Loaded from Browser Storage.');
-      }
+    if (alpacaApiKey && alpacaSecretKey) {
+      alpacaBrokerClient.setCredentials({
+        apiKeyId: alpacaApiKey,
+        secretKey: alpacaSecretKey,
+        isPaper: true,
+      });
+      setUseAlpacaBroker(true);
+      setAlpacaStatus('Alpaca Credentials Loaded & Active.');
     }
   }, []);
 
   const handleSave = async () => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('aitrader_alpaca_api_key', alpacaApiKey);
-      localStorage.setItem('aitrader_alpaca_secret_key', alpacaSecretKey);
+      localStorage.setItem('aitrader_alpaca_api_key', alpacaApiKey.trim());
+      localStorage.setItem('aitrader_alpaca_secret_key', alpacaSecretKey.trim());
       localStorage.setItem('aitrader_ai_provider', aiProvider);
-      localStorage.setItem('aitrader_ai_api_key', apiKey);
+      localStorage.setItem('aitrader_ai_api_key', apiKey.trim());
+      localStorage.setItem('aitrader_starting_balance', startingBalance.toString());
     }
 
-    // Configure AI SDK Provider
+    // Configure AI Provider
     aiProviderManager.setConfig({
       provider: aiProvider,
-      apiKey,
+      apiKey: apiKey.trim() || undefined,
     });
 
+    // Update risk engine config
+    deterministicRiskEngine.setConfig({
+      maxPositionRiskPercent: maxRisk,
+      maxDailyDrawdownPercent: maxDrawdown,
+      minRiskReward: minRR,
+      newsKillSwitch: killSwitch,
+    });
+
+    // Configure paper broker starting balance
+    paperBroker.setStartingBalance(startingBalance);
+
     // Configure Alpaca Broker
-    if (alpacaApiKey && alpacaSecretKey) {
+    if (alpacaApiKey.trim() && alpacaSecretKey.trim()) {
       alpacaBrokerClient.setCredentials({
-        apiKeyId: alpacaApiKey,
-        secretKey: alpacaSecretKey,
+        apiKeyId: alpacaApiKey.trim(),
+        secretKey: alpacaSecretKey.trim(),
         isPaper: true,
       });
 
@@ -79,16 +119,19 @@ export const SettingsView: React.FC = () => {
         setAlpacaStatus(`Connected & Saved! Equity: $${acc.equity.toLocaleString()}`);
         setUseAlpacaBroker(true);
       } catch (e: any) {
-        setAlpacaStatus(`Saved, but Alpaca returned error: ${e.message}`);
+        setAlpacaStatus(`Saved to browser, Alpaca status: ${e.message}`);
       }
     } else {
       setAlpacaStatus('Local Paper Broker Active (No Alpaca keys entered).');
       setUseAlpacaBroker(false);
     }
 
+    onCredentialsChange?.();
     setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    setTimeout(() => setSaved(false), 2500);
   };
+
+
 
   const handleExportDecisions = () => {
     const csv = dbPersistence.exportDecisionsToCSV();
@@ -121,7 +164,7 @@ export const SettingsView: React.FC = () => {
             System Configuration & Persistent Credentials
           </h2>
           <p className="text-xs text-gray-400">
-            Configure Alpaca Paper Trading API keys, real live market data sources, and LLM API keys. Keys save persistently to your browser.
+            Configure Alpaca Paper Trading API keys, real live market data sources, and LLM API keys. Keys save permanently in your browser.
           </p>
         </div>
         <button
@@ -129,7 +172,7 @@ export const SettingsView: React.FC = () => {
           className="px-5 py-2.5 rounded-xl font-bold text-sm bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/30 flex items-center gap-2 transition-all"
         >
           {saved ? <Check className="w-4 h-4 text-emerald-300" /> : null}
-          {saved ? 'Saved Changes!' : 'Save Settings'}
+          {saved ? 'Saved Successfully!' : 'Save Credentials'}
         </button>
       </div>
 
@@ -171,7 +214,7 @@ export const SettingsView: React.FC = () => {
 
         {alpacaStatus && (
           <div className="p-3 bg-[#0B111E] border border-gray-800 rounded-xl text-xs font-semibold text-emerald-400 flex items-center gap-2">
-            <Check className="w-4 h-4 text-emerald-400" />
+            <Check className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>{alpacaStatus}</span>
           </div>
         )}
@@ -186,15 +229,10 @@ export const SettingsView: React.FC = () => {
           </h3>
           <div className="flex items-center justify-between p-3 bg-[#0B111E] rounded-xl border border-gray-800">
             <div>
-              <span className="text-sm font-bold text-white block">Real Live Data (Exchange WebSockets)</span>
-              <span className="text-xs text-gray-400">Streams live price ticks, 100ms L2 depth & candles.</span>
+              <span className="text-sm font-bold text-white block">Market Data Source</span>
+              <span className="text-xs text-gray-400">Binance REST (primary) → Alpaca REST (fallback). WebSocket streams when available.</span>
             </div>
-            <button
-              onClick={() => setUseLiveWebSocket(!useLiveWebSocket)}
-              className={`w-12 h-6 rounded-full transition-all relative ${useLiveWebSocket ? 'bg-emerald-500' : 'bg-gray-800'}`}
-            >
-              <div className={`w-5 h-5 rounded-full bg-white absolute top-0.5 transition-all ${useLiveWebSocket ? 'right-0.5' : 'left-0.5'}`} />
-            </button>
+            <span className="text-[10px] px-2 py-1 rounded bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30">AUTO</span>
           </div>
         </div>
 

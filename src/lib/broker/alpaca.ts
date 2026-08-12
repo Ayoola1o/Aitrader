@@ -14,11 +14,22 @@ export class AlpacaBrokerClient {
   }
 
   public hasCredentials(): boolean {
-    return !!(this.credentials && this.credentials.apiKeyId && this.credentials.secretKey);
+    if (this.credentials && this.credentials.apiKeyId && this.credentials.secretKey) {
+      return true;
+    }
+    if (typeof window !== 'undefined') {
+      const key = localStorage.getItem('aitrader_alpaca_api_key');
+      const secret = localStorage.getItem('aitrader_alpaca_secret_key');
+      if (key && secret) {
+        this.credentials = { apiKeyId: key, secretKey: secret, isPaper: true };
+        return true;
+      }
+    }
+    return false;
   }
 
   private getHeaders(): HeadersInit {
-    if (!this.credentials) {
+    if (!this.hasCredentials() || !this.credentials) {
       throw new Error('Alpaca credentials not configured.');
     }
     return {

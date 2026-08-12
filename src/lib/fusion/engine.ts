@@ -1,124 +1,117 @@
-import { AgentSignal, SignalFusionResult, RegimeType, ActionType } from '@/types/trading';
+import { AgentSignal, SignalFusionResult, ActionType, RegimeType } from '@/types/trading';
+
+// Configurable agent weights per regime
+const DEFAULT_WEIGHTS: Record<string, number> = {
+  regime: 1.4,
+  technical: 1.2,
+  momentum: 1.0,
+  liquidity: 0.9,
+  positioning: 0.7,
+  volatility: 1.0,
+  macro: 0.0, // macro is UNAVAILABLE so weight 0
+  execution: 0.8,
+};
+
+const CONFLICT_THRESHOLD = 0.35; // if buy vs sell diverge by < this, conflict
+const NO_TRADE_CONFIDENCE_FLOOR = 0.68; // minimum confidence to trade
 
 export class SignalFusionEngine {
-  private getRegimeWeights(regime: RegimeType): Record<string, number> {
-    switch (regime) {
-      case 'TRENDING_UP':
-      case 'TRENDING_DOWN':
-        return {
-          regime: 0.20,
-          technical: 0.20,
-          momentum: 0.20,
-          liquidity: 0.15,
-          positioning: 0.10,
-          volatility: 0.05,
-          macro: 0.05,
-          execution: 0.05,
-        };
-      case 'RANGING':
-        return {
-          liquidity: 0.25,
-          technical: 0.20,
-          volatility: 0.20,
-          positioning: 0.15,
-          regime: 0.10,
-          momentum: 0.05,
-          macro: 0.03,
-          execution: 0.02,
-        };
-      case 'HIGH_VOLATILITY':
-        return {
-          volatility: 0.30,
-          liquidity: 0.25,
-          positioning: 0.15,
-          macro: 0.10,
-          technical: 0.10,
-          regime: 0.05,
-          momentum: 0.03,
-          execution: 0.02,
-        };
-      default:
-        return {
-          regime: 0.15,
-          technical: 0.15,
-          liquidity: 0.15,
-          positioning: 0.15,
-          momentum: 0.10,
-          volatility: 0.10,
-          macro: 0.10,
-          execution: 0.10,
-        };
-    }
-  }
+  fuseSignals(signals: AgentSignal[], regime: RegimeType): SignalFusionResult {
+    const weights = { ...DEFAULT_WEIGHTS };
 
-  public fuseSignals(signals: AgentSignal[], regime: RegimeType): SignalFusionResult {
-    const weights = this.getRegimeWeights(regime);
-    let weightedBullish = 0;
-    let weightedBearish = 0;
-    let weightedNeutral = 0;
-    let weightedCaution = 0;
+    // Regime-adjusted weights
+    if (regime === 'TRENDING_UP' || regime === 'TRENDING_DOWN') {
+      weights.technical = 1.4;
+      weights.momentum = 1.2;
+    } else if (regime === 'RANGING') {
+      weights.liquidity = 1.2;
+      weights.volatility = 1.1;
+    }
+
+    let weightedBuy = 0, weightedSell = 0, weightedHold = 0, weightedNoTrade = 0;
     let totalWeight = 0;
+    const agentWeights: Record<string, number> = {};
 
-    signals.forEach((signal) => {
-      const weight = weights[signal.agentId] || 0.10;
-      totalWeight += weight;
-
-      if (signal.bias === 'BULLISH') {
-        weightedBullish += signal.score * weight;
-      } else if (signal.bias === 'BEARISH') {
-        weightedBearish += signal.score * weight;
-      } else if (signal.bias === 'CAUTION') {
-        weightedCaution += (1 - signal.score) * weight;
-      } else {
-        weightedNeutral += 0.5 * weight;
+    for (const sig of signals) {
+      // Skip unavailable agents from the fusion score
+      if (sig.bias === 'UNAVAILABLE' || sig.dataQuality === 'UNAVAILABLE') {
+        agentWeights[sig.agentId] = 0;
+        continue;
       }
-    });
 
-    const buyScore = Number((weightedBullish / totalWeight).toFixed(3));
-    const sellScore = Number((weightedBearish / totalWeight).toFixed(3));
-    const holdScore = Number((weightedNeutral / totalWeight).toFixed(3));
-    const cautionPenalty = Number((weightedCaution / totalWeight).toFixed(3));
+      const w = (weights[sig.agentId] ?? 1.0) * sig.confidence;
+      agentWeights[sig.agentId] = Number(w.toFixed(3));
+      totalWeight += w;
 
-    const noTradeScore = Number(Math.max(holdScore, cautionPenalty, 1 - Math.max(buyScore, sellScore)).toFixed(3));
-
-    // Conflict detection: if both Bullish and Bearish scores are close (within 0.15)
-    const conflictingSignals = Math.abs(buyScore - sellScore) < 0.15 && Math.max(buyScore, sellScore) > 0.35;
-
-    let dominantAction: ActionType = 'HOLD';
-    let abstainReason: string | undefined;
-
-    if (conflictingSignals) {
-      dominantAction = 'NO_TRADE';
-      abstainReason = 'Conflicting signals between technical indicators and market positioning.';
-    } else if (cautionPenalty > 0.30) {
-      dominantAction = 'NO_TRADE';
-      abstainReason = 'Excessive market risk / crowded positioning caution.';
-    } else if (buyScore >= 0.55 && buyScore > sellScore + 0.20) {
-      dominantAction = 'BUY';
-    } else if (sellScore >= 0.55 && sellScore > buyScore + 0.20) {
-      dominantAction = 'SELL';
-    } else {
-      dominantAction = 'HOLD';
-      abstainReason = 'Insufficient statistical edge for directional entry.';
+      const score = sig.score;
+      switch (sig.action) {
+        case 'BUY': weightedBuy += score * w; break;
+        case 'SELL': weightedSell += (1 - score) * w; break;
+        case 'HOLD': weightedHold += 0.5 * w; break;
+        case 'NO_TRADE': weightedNoTrade += w; break;
+      }
     }
 
-    const confidence = Number(
-      (
-        Math.max(buyScore, sellScore, holdScore) * 0.7 +
-        (1 - (conflictingSignals ? 0.4 : 0)) * 0.3
-      ).toFixed(2)
+    if (totalWeight === 0) {
+      return {
+        buyScore: 0, sellScore: 0, holdScore: 0, noTradeScore: 1,
+        dominantAction: 'NO_TRADE',
+        confidence: 1.0, conflictingSignals: false,
+        abstainReason: 'All agents unavailable or returned NO_TRADE',
+        agentWeights,
+      };
+    }
+
+    const buyScore = weightedBuy / totalWeight;
+    const sellScore = weightedSell / totalWeight;
+    const holdScore = weightedHold / totalWeight;
+    const noTradeScore = weightedNoTrade / totalWeight;
+
+    // Conflict detection: if buy and sell scores are too close
+    const conflictingSignals = Math.abs(buyScore - sellScore) < CONFLICT_THRESHOLD
+      && buyScore > 0.15 && sellScore > 0.15;
+
+    // Any NO_TRADE signal from critical agents (regime, volatility)
+    const criticalNoTrade = signals.some(
+      s => (s.agentId === 'regime' || s.agentId === 'volatility' || s.agentId === 'execution') &&
+           s.action === 'NO_TRADE'
     );
 
+    let dominantAction: ActionType;
+    let abstainReason: string | undefined;
+
+    if (criticalNoTrade || conflictingSignals || noTradeScore > 0.35) {
+      dominantAction = 'NO_TRADE';
+      abstainReason = criticalNoTrade
+        ? 'Critical agent (regime/volatility/execution) returned NO_TRADE'
+        : conflictingSignals
+        ? `Signal conflict: BUY ${(buyScore * 100).toFixed(0)}% vs SELL ${(sellScore * 100).toFixed(0)}% — insufficient edge`
+        : 'High NO_TRADE score from agents';
+    } else {
+      const max = Math.max(buyScore, sellScore, holdScore);
+      dominantAction = max === buyScore ? 'BUY' : max === sellScore ? 'SELL' : 'HOLD';
+    }
+
+    // Overall confidence
+    const spread = Math.abs(buyScore - sellScore);
+    const confidence = conflictingSignals ? 0.4 : Math.min(0.95, 0.45 + spread * 0.8);
+
+    // Enforce minimum confidence floor
+    if (confidence < NO_TRADE_CONFIDENCE_FLOOR && dominantAction !== 'NO_TRADE' && dominantAction !== 'HOLD') {
+      dominantAction = 'NO_TRADE';
+      abstainReason = `Confidence ${(confidence * 100).toFixed(0)}% below minimum threshold ${(NO_TRADE_CONFIDENCE_FLOOR * 100).toFixed(0)}%`;
+    }
+
     return {
-      buyScore,
-      sellScore,
-      holdScore,
-      noTradeScore,
+      buyScore: Number(buyScore.toFixed(3)),
+      sellScore: Number(sellScore.toFixed(3)),
+      holdScore: Number(holdScore.toFixed(3)),
+      noTradeScore: Number(noTradeScore.toFixed(3)),
       dominantAction,
-      confidence,
+      confidence: Number(confidence.toFixed(3)),
       conflictingSignals,
       abstainReason,
-      agentWeights: weights,
+      agentWeights,
     };
   }
 }

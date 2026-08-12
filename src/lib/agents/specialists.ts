@@ -1,278 +1,286 @@
-import { MarketSnapshot, FeatureVector, AgentSignal, RegimeType } from '@/types/trading';
+import { MarketSnapshot, FeatureVector, AgentSignal, RegimeType, Evidence, ActionType, DataStatus } from '@/types/trading';
 
+// ── Regime Classifier ───────────────────────────────────────────────────────
+export function classifyRegime(features: FeatureVector, snapshot: MarketSnapshot): RegimeType {
+  const { adx, ema20, ema50, ema200, volPercentile, bollingerExpansion } = features;
+  const price = snapshot.price;
+
+  if (volPercentile > 85 && bollingerExpansion) return 'HIGH_VOLATILITY';
+  if (volPercentile < 20 && adx < 20) return 'LOW_VOLATILITY';
+
+  if (adx > 28) {
+    if (ema20 > ema50 && ema50 > ema200 && price > ema20) return 'TRENDING_UP';
+    if (ema20 < ema50 && ema50 < ema200 && price < ema20) return 'TRENDING_DOWN';
+  }
+
+  if (bollingerExpansion && adx > 22) return 'BREAKOUT';
+  if (adx < 18) return 'RANGING';
+  return 'TRANSITION';
+}
+
+// ── Agent Helpers ───────────────────────────────────────────────────────────
+function makeSignal(
+  id: string,
+  name: string,
+  action: ActionType,
+  bias: AgentSignal['bias'],
+  score: number,
+  confidence: number,
+  summary: string,
+  evidence: Evidence[],
+  risks: string[],
+  keyMetrics: Record<string, string | number>,
+  dataStatus: DataStatus = 'LIVE'
+): AgentSignal {
+  return {
+    agentId: id, agentName: name, action, bias, score: Number(score.toFixed(3)),
+    confidence: Number(confidence.toFixed(3)), summary, evidence, risks, keyMetrics,
+    dataQuality: dataStatus, timestamp: Date.now(),
+  };
+}
+
+// ── 8 Specialist Agents ─────────────────────────────────────────────────────
 export class SpecialistAgentSystem {
-  public evaluateAllAgents(snapshot: MarketSnapshot, features: FeatureVector): {
-    signals: AgentSignal[];
-    regime: RegimeType;
-  } {
-    const regimeSignal = this.evaluateRegimeAgent(snapshot, features);
-    const technicalSignal = this.evaluateTechnicalAgent(snapshot, features);
-    const liquiditySignal = this.evaluateLiquidityAgent(snapshot, features);
-    const positioningSignal = this.evaluatePositioningAgent(snapshot, features);
-    const momentumSignal = this.evaluateMomentumAgent(snapshot, features);
-    const volatilitySignal = this.evaluateVolatilityAgent(snapshot, features);
-    const macroSignal = this.evaluateMacroAgent(snapshot, features);
-    const executionSignal = this.evaluateExecutionAgent(snapshot, features);
-
-    const regime = (regimeSignal.keyMetrics.regimeState as RegimeType) || 'TRENDING_UP';
-
+  evaluateAllAgents(
+    snapshot: MarketSnapshot,
+    features: FeatureVector
+  ): { signals: AgentSignal[]; regime: RegimeType } {
+    const regime = classifyRegime(features, snapshot);
     return {
       signals: [
-        regimeSignal,
-        technicalSignal,
-        liquiditySignal,
-        positioningSignal,
-        momentumSignal,
-        volatilitySignal,
-        macroSignal,
-        executionSignal,
+        this.regimeAgent(regime, features, snapshot),
+        this.technicalAgent(features, snapshot),
+        this.momentumAgent(features, snapshot),
+        this.liquidityAgent(features, snapshot),
+        this.positioningAgent(features, snapshot),
+        this.volatilityAgent(features, snapshot),
+        this.macroAgent(snapshot),
+        this.executionAgent(features, snapshot),
       ],
       regime,
     };
   }
 
   // 1. Regime Agent
-  private evaluateRegimeAgent(snapshot: MarketSnapshot, features: FeatureVector): AgentSignal {
+  private regimeAgent(regime: RegimeType, features: FeatureVector, snapshot: MarketSnapshot): AgentSignal {
+    const { adx, ema20, ema50, ema200 } = features;
     const price = snapshot.price;
-    const isTrendingUp = price > features.ema20 && features.ema20 > features.ema50 && features.adx > 25;
-    const isTrendingDown = price < features.ema20 && features.ema20 < features.ema50 && features.adx > 25;
-    const isHighVol = features.volPercentile > 0.85;
 
-    let regimeState: RegimeType = 'RANGING';
-    let bias: AgentSignal['bias'] = 'NEUTRAL';
-    let score = 0.65;
+    const evidence: Evidence[] = [
+      { label: 'ADX', value: adx.toFixed(1), signal: adx > 25 ? 'BULLISH' : 'NEUTRAL' },
+      { label: 'EMA20 vs EMA50', value: ema20 > ema50 ? 'Above' : 'Below', signal: ema20 > ema50 ? 'BULLISH' : 'BEARISH' },
+      { label: 'Regime', value: regime, signal: regime === 'TRENDING_UP' ? 'BULLISH' : regime === 'TRENDING_DOWN' ? 'BEARISH' : 'NEUTRAL' },
+    ];
 
-    if (isHighVol) {
-      regimeState = 'HIGH_VOLATILITY';
-      bias = 'CAUTION';
-      score = 0.55;
-    } else if (isTrendingUp) {
-      regimeState = 'TRENDING_UP';
-      bias = 'BULLISH';
-      score = 0.84;
-    } else if (isTrendingDown) {
-      regimeState = 'TRENDING_DOWN';
-      bias = 'BEARISH';
-      score = 0.82;
-    } else if (features.adx < 20) {
-      regimeState = 'RANGING';
-      bias = 'NEUTRAL';
-      score = 0.70;
-    } else if (features.bollingerExpansion) {
-      regimeState = 'BREAKOUT';
-      bias = price > features.vwap ? 'BULLISH' : 'BEARISH';
-      score = 0.78;
-    }
+    let action: ActionType = 'HOLD';
+    let score = 0.5;
+    if (regime === 'TRENDING_UP') { action = 'BUY'; score = 0.78; }
+    else if (regime === 'TRENDING_DOWN') { action = 'SELL'; score = 0.78; }
+    else if (regime === 'HIGH_VOLATILITY' || regime === 'RANGING') { action = 'NO_TRADE'; score = 0.2; }
+    else if (regime === 'BREAKOUT') { score = 0.65; action = ema20 > ema50 ? 'BUY' : 'SELL'; }
 
-    return {
-      agentId: 'regime',
-      agentName: 'Market Regime Agent',
-      bias,
-      score,
-      confidence: 0.85,
-      summary: `Market state: ${regimeState}. ADX=${features.adx}, EMA20/50 aligned.`,
-      keyMetrics: {
-        regimeState,
-        adx: features.adx,
-        trendAlignment: isTrendingUp ? 'BULLISH' : isTrendingDown ? 'BEARISH' : 'FLAT',
-      },
-    };
+    // Block trading if candles are simulated
+    const isSimulated = snapshot.dataQuality.candlesStatus === 'SIMULATED';
+    if (isSimulated) { action = 'NO_TRADE'; score = 0.1; }
+
+    return makeSignal('regime', 'Regime Agent', action,
+      score > 0.6 ? (action === 'BUY' ? 'BULLISH' : action === 'SELL' ? 'BEARISH' : 'NEUTRAL') : 'NEUTRAL',
+      score, isSimulated ? 0.15 : adx > 30 ? 0.85 : adx > 20 ? 0.70 : 0.50,
+      `Regime: ${regime}. ADX: ${adx.toFixed(1)}.`,
+      evidence,
+      regime === 'HIGH_VOLATILITY' ? ['High volatility — trade size risk'] : [],
+      { regime, adx: adx.toFixed(1), ema20: ema20.toFixed(2) },
+      isSimulated ? 'SIMULATED' : snapshot.dataQuality.candlesStatus
+    );
   }
 
   // 2. Technical Agent
-  private evaluateTechnicalAgent(snapshot: MarketSnapshot, features: FeatureVector): AgentSignal {
+  private technicalAgent(features: FeatureVector, snapshot: MarketSnapshot): AgentSignal {
+    const { ema20, ema50, rsi, adx, bollingerUpper, bollingerLower, supportLevel, resistanceLevel } = features;
     const price = snapshot.price;
-    let bullPoints = 0;
-    let totalPoints = 5;
 
-    if (price > features.ema20) bullPoints++;
-    if (price > features.vwap) bullPoints++;
-    if (features.rsi > 45 && features.rsi < 70) bullPoints++;
-    if (features.adx > 22) bullPoints++;
-    if (price > features.supportLevel * 1.005) bullPoints++;
+    const emaBullish = price > ema20 && ema20 > ema50;
+    const emaBearish = price < ema20 && ema20 < ema50;
+    const rsiOversold = rsi < 35;
+    const rsiOverbought = rsi > 68;
 
-    const score = bullPoints / totalPoints;
-    const bias: AgentSignal['bias'] = score >= 0.7 ? 'BULLISH' : score <= 0.3 ? 'BEARISH' : 'NEUTRAL';
+    const evidence: Evidence[] = [
+      { label: 'Price vs EMA20', value: (price > ema20 ? 'Above' : 'Below'), signal: price > ema20 ? 'BULLISH' : 'BEARISH' },
+      { label: 'EMA20 vs EMA50', value: (ema20 > ema50 ? 'Golden' : 'Death'), signal: ema20 > ema50 ? 'BULLISH' : 'BEARISH' },
+      { label: 'RSI', value: rsi.toFixed(1), signal: rsiOversold ? 'BULLISH' : rsiOverbought ? 'BEARISH' : 'NEUTRAL' },
+      { label: 'ADX', value: adx.toFixed(1), signal: adx > 25 ? 'BULLISH' : 'NEUTRAL' },
+    ];
 
-    return {
-      agentId: 'technical',
-      agentName: 'Technical Analysis Agent',
-      bias,
-      score: Number(score.toFixed(2)),
-      confidence: 0.88,
-      summary: `Price $${price} vs VWAP $${features.vwap}. RSI: ${features.rsi}, ADX: ${features.adx}.`,
-      keyMetrics: {
-        rsi: features.rsi,
-        vwapDistancePct: Number((((price - features.vwap) / features.vwap) * 100).toFixed(2)),
-        support: features.supportLevel,
-        resistance: features.resistanceLevel,
-      },
-    };
+    let score = 0.5;
+    if (emaBullish && !rsiOverbought) score = 0.78;
+    else if (emaBearish && !rsiOversold) score = 0.22;
+    else if (rsiOversold && emaBullish) score = 0.85;
+    else if (rsiOverbought && emaBearish) score = 0.15;
+
+    const action: ActionType = score > 0.65 ? 'BUY' : score < 0.35 ? 'SELL' : 'HOLD';
+    const risks: string[] = [];
+    if (resistanceLevel > 0 && price > resistanceLevel * 0.995) risks.push(`Resistance ${((resistanceLevel - price) / price * 100).toFixed(2)}% above`);
+    if (supportLevel > 0 && price < supportLevel * 1.005) risks.push(`Near support ${supportLevel.toFixed(2)}`);
+
+    return makeSignal('technical', 'Technical Agent', action,
+      score > 0.6 ? 'BULLISH' : score < 0.4 ? 'BEARISH' : 'NEUTRAL',
+      score, adx > 25 ? 0.80 : 0.60,
+      `EMA ${emaBullish ? 'bullish stack' : emaBearish ? 'bearish stack' : 'mixed'}. RSI ${rsi.toFixed(1)}.`,
+      evidence, risks,
+      { rsi: rsi.toFixed(1), adx: adx.toFixed(1), ema20: ema20.toFixed(2), ema50: ema50.toFixed(2) }
+    );
   }
 
-  // 3. Liquidity Agent
-  private evaluateLiquidityAgent(snapshot: MarketSnapshot, features: FeatureVector): AgentSignal {
-    const depthOk = features.liquidityScore > 0.6;
-    const lowSlippage = features.slippageRisk === 'LOW';
-    const imbalance = snapshot.orderBook.bidAskImbalance;
+  // 3. Momentum Agent
+  private momentumAgent(features: FeatureVector, snapshot: MarketSnapshot): AgentSignal {
+    const { roc, ppo, macd, macdSignal, volumeZScore, volumeAcceleration, momentumDivergence } = features;
 
-    let bias: AgentSignal['bias'] = 'NEUTRAL';
-    if (imbalance > 0.25) bias = 'BULLISH';
-    else if (imbalance < -0.25) bias = 'BEARISH';
-    if (!depthOk) bias = 'CAUTION';
+    const evidence: Evidence[] = [
+      { label: 'ROC-10', value: roc.toFixed(2) + '%', signal: roc > 0.5 ? 'BULLISH' : roc < -0.5 ? 'BEARISH' : 'NEUTRAL' },
+      { label: 'MACD vs Signal', value: macd > macdSignal ? 'Above' : 'Below', signal: macd > macdSignal ? 'BULLISH' : 'BEARISH' },
+      { label: 'Volume Z-Score', value: volumeZScore.toFixed(2), signal: volumeZScore > 1 ? 'BULLISH' : 'NEUTRAL' },
+      { label: 'Divergence', value: momentumDivergence ? 'YES' : 'NO', signal: momentumDivergence ? 'BEARISH' : 'NEUTRAL' },
+    ];
 
-    return {
-      agentId: 'liquidity',
-      agentName: 'Liquidity Agent',
-      bias,
-      score: features.liquidityScore,
-      confidence: 0.78,
-      summary: `Spread: ${features.spread} (${snapshot.orderBook.spreadPercent.toFixed(3)}%). Imbalance: ${imbalance > 0 ? '+' : ''}${(imbalance * 100).toFixed(1)}%.`,
-      keyMetrics: {
-        spread: features.spread,
-        slippageRisk: features.slippageRisk,
-        imbalance: imbalance,
-        sweepDetected: features.sweepDetected ? 'YES' : 'NO',
-      },
-    };
+    let score = 0.5;
+    if (roc > 1 && macd > macdSignal && !momentumDivergence) score = 0.80;
+    else if (roc < -1 && macd < macdSignal && !momentumDivergence) score = 0.20;
+    else if (momentumDivergence) score = roc > 0 ? 0.35 : 0.65;
+
+    if (volumeZScore > 1.5) score = score > 0.5 ? Math.min(score + 0.07, 0.92) : Math.max(score - 0.07, 0.08);
+
+    const action: ActionType = score > 0.65 ? 'BUY' : score < 0.35 ? 'SELL' : 'HOLD';
+    return makeSignal('momentum', 'Momentum Agent', action,
+      score > 0.6 ? 'BULLISH' : score < 0.4 ? 'BEARISH' : 'NEUTRAL',
+      score, momentumDivergence ? 0.55 : 0.72,
+      `ROC ${roc.toFixed(2)}%. MACD ${macd > macdSignal ? 'bullish' : 'bearish'}. VolumeZ: ${volumeZScore.toFixed(1)}.`,
+      evidence, momentumDivergence ? ['Momentum divergence — weakening signal'] : [],
+      { roc: roc.toFixed(2), macd: macd.toFixed(4), volumeZScore: volumeZScore.toFixed(2) }
+    );
   }
 
-  // 4. Long/Short Positioning Agent
-  private evaluatePositioningAgent(snapshot: MarketSnapshot, features: FeatureVector): AgentSignal {
-    const lsRatio = snapshot.longShortRatio;
-    const isCrowdedLong = lsRatio > 1.8;
-    const isCrowdedShort = lsRatio < 0.7;
+  // 4. Liquidity Agent
+  private liquidityAgent(features: FeatureVector, snapshot: MarketSnapshot): AgentSignal {
+    const { spreadPercent, bidAskImbalance, liquidityScore, slippageRisk, sweepDetected } = features;
+    const ob = snapshot.orderBook;
+    const dataStatus = snapshot.dataQuality.orderBookStatus;
 
-    let bias: AgentSignal['bias'] = 'NEUTRAL';
-    let summary = `Long/Short Ratio: ${lsRatio.toFixed(2)}. Funding: ${(snapshot.fundingRate * 100).toFixed(4)}%.`;
+    const evidence: Evidence[] = [
+      { label: 'Spread %', value: (spreadPercent * 100).toFixed(4) + '%', signal: spreadPercent < 0.0005 ? 'BULLISH' : spreadPercent > 0.002 ? 'BEARISH' : 'NEUTRAL' },
+      { label: 'Bid/Ask Imbalance', value: bidAskImbalance.toFixed(3), signal: bidAskImbalance > 0.1 ? 'BULLISH' : bidAskImbalance < -0.1 ? 'BEARISH' : 'NEUTRAL' },
+      { label: 'Sweep', value: sweepDetected ? 'DETECTED' : 'None', signal: sweepDetected ? 'BULLISH' : 'NEUTRAL' },
+      { label: 'Order Book', value: dataStatus, signal: dataStatus === 'LIVE' ? 'BULLISH' : 'NEUTRAL' },
+    ];
 
-    if (isCrowdedLong) {
-      bias = 'CAUTION'; // High risk of long squeeze
-      summary += ' WARNING: Crowded long positioning detected.';
-    } else if (isCrowdedShort) {
-      bias = 'BULLISH'; // Short squeeze potential
-      summary += ' Short squeeze potential detected.';
-    } else {
-      bias = lsRatio >= 1.0 ? 'BULLISH' : 'BEARISH';
+    const action: ActionType = slippageRisk === 'HIGH' ? 'NO_TRADE' :
+      bidAskImbalance > 0.15 ? 'BUY' : bidAskImbalance < -0.15 ? 'SELL' : 'HOLD';
+    const score = 0.5 + bidAskImbalance * 0.3;
+    const confidence = dataStatus === 'LIVE' ? 0.75 : dataStatus === 'SIMULATED' ? 0.30 : 0.45;
+
+    return makeSignal('liquidity', 'Liquidity Agent', action,
+      bidAskImbalance > 0.1 ? 'BULLISH' : bidAskImbalance < -0.1 ? 'BEARISH' : 'NEUTRAL',
+      Math.max(0.05, Math.min(0.95, score)), confidence,
+      `Spread ${(spreadPercent * 100).toFixed(4)}%. Slippage ${slippageRisk}. OB: ${dataStatus}.`,
+      evidence,
+      slippageRisk === 'HIGH' ? ['High spread — execution cost risk'] : [],
+      { spread: (spreadPercent * 100).toFixed(4) + '%', imbalance: bidAskImbalance.toFixed(3), slippage: slippageRisk },
+      dataStatus
+    );
+  }
+
+  // 5. Positioning Agent
+  private positioningAgent(features: FeatureVector, snapshot: MarketSnapshot): AgentSignal {
+    const { fundingDivergence, crowdedPositioning } = features;
+    const funding = snapshot.fundingRate;
+
+    if (funding === null) {
+      return makeSignal('positioning', 'Positioning Agent', 'NO_TRADE', 'UNAVAILABLE', 0.5, 0.0,
+        'Funding rate data UNAVAILABLE. No positioning signal.',
+        [{ label: 'Funding Rate', value: 'UNAVAILABLE', signal: 'NEUTRAL' }],
+        ['No funding data source connected'],
+        { fundingRate: 'N/A' }, 'UNAVAILABLE'
+      );
     }
 
-    return {
-      agentId: 'positioning',
-      agentName: 'Positioning Agent',
-      bias,
-      score: isCrowdedLong ? 0.42 : 0.75,
-      confidence: 0.81,
-      summary,
-      keyMetrics: {
-        longShortRatio: Number(lsRatio.toFixed(2)),
-        fundingRate: Number((snapshot.fundingRate * 100).toFixed(4)) + '%',
-        openInterest: (snapshot.openInterest / 1e6).toFixed(1) + 'M',
-      },
-    };
-  }
+    const evidence: Evidence[] = [
+      { label: 'Funding Rate', value: (funding * 100).toFixed(4) + '%', signal: funding > 0.001 ? 'BEARISH' : funding < -0.001 ? 'BULLISH' : 'NEUTRAL' },
+      { label: 'Crowd Positioning', value: crowdedPositioning, signal: crowdedPositioning === 'LONG' ? 'BEARISH' : crowdedPositioning === 'SHORT' ? 'BULLISH' : 'NEUTRAL' },
+    ];
 
-  // 5. Momentum Agent
-  private evaluateMomentumAgent(snapshot: MarketSnapshot, features: FeatureVector): AgentSignal {
-    const isStrongUp = features.roc > 0.5 && features.ppo > 0 && features.volumeAcceleration > 1.1;
-    const isStrongDown = features.roc < -0.5 && features.ppo < 0 && features.volumeAcceleration > 1.1;
-
-    let bias: AgentSignal['bias'] = 'NEUTRAL';
-    let score = 0.60;
-
-    if (isStrongUp) {
-      bias = 'BULLISH';
-      score = 0.85;
-    } else if (isStrongDown) {
-      bias = 'BEARISH';
-      score = 0.82;
-    } else if (features.roc > 0) {
-      bias = 'BULLISH';
-      score = 0.68;
-    }
-
-    return {
-      agentId: 'momentum',
-      agentName: 'Momentum Agent',
-      bias,
-      score,
-      confidence: 0.83,
-      summary: `ROC: ${features.roc}%, PPO: ${features.ppo}%, Vol Accel: ${features.volumeAcceleration}x.`,
-      keyMetrics: {
-        roc: features.roc,
-        ppo: features.ppo,
-        volumeAccel: features.volumeAcceleration,
-      },
-    };
+    const action: ActionType = crowdedPositioning === 'LONG' ? 'SELL' : crowdedPositioning === 'SHORT' ? 'BUY' : 'HOLD';
+    return makeSignal('positioning', 'Positioning Agent', action,
+      crowdedPositioning === 'LONG' ? 'BEARISH' : crowdedPositioning === 'SHORT' ? 'BULLISH' : 'NEUTRAL',
+      0.5, 0.55,
+      `Funding ${(funding * 100).toFixed(4)}%. Crowd: ${crowdedPositioning}.`,
+      evidence, [],
+      { fundingRate: (funding * 100).toFixed(4) + '%', crowded: crowdedPositioning }
+    );
   }
 
   // 6. Volatility Agent
-  private evaluateVolatilityAgent(snapshot: MarketSnapshot, features: FeatureVector): AgentSignal {
-    const volPct = features.volPercentile;
-    let bias: AgentSignal['bias'] = 'NEUTRAL';
-    let score = 0.70;
+  private volatilityAgent(features: FeatureVector, snapshot: MarketSnapshot): AgentSignal {
+    const { realizedVol, volPercentile, atr, bollingerExpansion, slippageRisk } = features;
+    const price = snapshot.price;
 
-    if (volPct > 0.85) {
-      bias = 'CAUTION';
-      score = 0.50;
-    } else if (volPct < 0.30) {
-      bias = 'NEUTRAL';
-      score = 0.75;
-    } else {
-      score = 0.80;
-    }
+    const evidence: Evidence[] = [
+      { label: 'Realized Vol', value: realizedVol.toFixed(1) + '%', signal: 'NEUTRAL' },
+      { label: 'Vol Percentile', value: volPercentile.toFixed(1) + '%', signal: volPercentile > 80 ? 'BEARISH' : volPercentile < 20 ? 'BULLISH' : 'NEUTRAL' },
+      { label: 'ATR', value: atr.toFixed(4), signal: 'NEUTRAL' },
+      { label: 'Bollinger Expansion', value: bollingerExpansion ? 'YES' : 'NO', signal: bollingerExpansion ? 'BEARISH' : 'NEUTRAL' },
+    ];
 
-    return {
-      agentId: 'volatility',
-      agentName: 'Volatility Agent',
-      bias,
-      score,
-      confidence: 0.76,
-      summary: `Realized Volatility: ${features.realizedVol}% (Percentile: ${(volPct * 100).toFixed(0)}th). ATR: $${features.atr}.`,
-      keyMetrics: {
-        realizedVol: features.realizedVol,
-        volPercentile: (volPct * 100).toFixed(0) + '%',
-        atr: features.atr,
-      },
-    };
+    const action: ActionType = volPercentile > 85 ? 'NO_TRADE' : 'HOLD';
+    const score = volPercentile > 85 ? 0.2 : volPercentile < 20 ? 0.75 : 0.5;
+
+    return makeSignal('volatility', 'Volatility Agent', action,
+      volPercentile > 80 ? 'CAUTION' : 'NEUTRAL',
+      score, 0.70,
+      `RV ${realizedVol.toFixed(1)}% at ${volPercentile.toFixed(0)}th percentile. ATR: ${atr.toFixed(2)}.`,
+      evidence,
+      volPercentile > 80 ? ['Elevated volatility — wider stops needed'] : [],
+      { realizedVol: realizedVol + '%', volPercentile: volPercentile + '%', atr: atr.toFixed(4) }
+    );
   }
 
-  // 7. Macro/Sentiment Agent
-  private evaluateMacroAgent(snapshot: MarketSnapshot, features: FeatureVector): AgentSignal {
-    const isEventNear = features.minutesToNextEvent < 30;
-    const bias: AgentSignal['bias'] = isEventNear ? 'CAUTION' : 'NEUTRAL';
-
-    return {
-      agentId: 'macro',
-      agentName: 'Macro / Sentiment Agent',
-      bias,
-      score: isEventNear ? 0.45 : 0.68,
-      confidence: 0.72,
-      summary: `DXY: ${features.dxyIndex}, VIX Proxy: ${features.vixProxy}. Event in ${features.minutesToNextEvent} mins.`,
-      keyMetrics: {
-        dxy: features.dxyIndex,
-        vix: features.vixProxy,
-        nextEventInMins: features.minutesToNextEvent,
-      },
-    };
+  // 7. Macro Agent — honestly unavailable
+  private macroAgent(snapshot: MarketSnapshot): AgentSignal {
+    return makeSignal('macro', 'Macro Agent', 'NO_TRADE', 'UNAVAILABLE', 0.5, 0.0,
+      'Macro data UNAVAILABLE. No validated source for DXY, VIX, or news events.',
+      [
+        { label: 'DXY', value: 'UNAVAILABLE', signal: 'NEUTRAL' },
+        { label: 'VIX', value: 'UNAVAILABLE', signal: 'NEUTRAL' },
+        { label: 'News Events', value: 'UNAVAILABLE', signal: 'NEUTRAL' },
+      ],
+      ['No macro data source connected — agent abstaining'],
+      { status: 'UNAVAILABLE' },
+      'UNAVAILABLE'
+    );
   }
 
-  // 8. Execution Agent
-  private evaluateExecutionAgent(snapshot: MarketSnapshot, features: FeatureVector): AgentSignal {
-    const spreadPct = snapshot.orderBook.spreadPercent;
-    const isQualityGood = spreadPct < 0.02 && features.slippageRisk === 'LOW';
+  // 8. Execution Quality Agent
+  private executionAgent(features: FeatureVector, snapshot: MarketSnapshot): AgentSignal {
+    const { spreadPercent, slippageRisk, liquidityScore, bidAskImbalance } = features;
+    const ob = snapshot.orderBook;
+    const bidDepth = ob.bidDepth;
+    const askDepth = ob.askDepth;
 
-    return {
-      agentId: 'execution',
-      agentName: 'Execution Quality Agent',
-      bias: isQualityGood ? 'BULLISH' : 'CAUTION',
-      score: isQualityGood ? 0.90 : 0.60,
-      confidence: 0.89,
-      summary: `Slippage Risk: ${features.slippageRisk}. Rec Order: ${isQualityGood ? 'LIMIT / MARKET' : 'LIMIT ONLY'}.`,
-      keyMetrics: {
-        slippageRisk: features.slippageRisk,
-        recommendedOrderType: isQualityGood ? 'LIMIT' : 'POST_ONLY_LIMIT',
-      },
-    };
+    const evidence: Evidence[] = [
+      { label: 'Spread', value: (spreadPercent * 100).toFixed(4) + '%', signal: spreadPercent < 0.001 ? 'BULLISH' : 'NEUTRAL' },
+      { label: 'Slippage Risk', value: slippageRisk, signal: slippageRisk === 'LOW' ? 'BULLISH' : slippageRisk === 'HIGH' ? 'BEARISH' : 'NEUTRAL' },
+      { label: 'Liquidity Score', value: liquidityScore.toFixed(3), signal: liquidityScore > 0.7 ? 'BULLISH' : 'NEUTRAL' },
+    ];
+
+    const execOk = slippageRisk !== 'HIGH' && liquidityScore > 0.4;
+    const action: ActionType = execOk ? 'HOLD' : 'NO_TRADE';
+
+    return makeSignal('execution', 'Execution Quality Agent', action,
+      execOk ? 'NEUTRAL' : 'CAUTION',
+      execOk ? 0.60 : 0.25, execOk ? 0.72 : 0.80,
+      `Execution quality ${slippageRisk}. Liquidity: ${liquidityScore.toFixed(2)}.`,
+      evidence,
+      slippageRisk === 'HIGH' ? ['Execution cost may erode edge'] : [],
+      { spread: (spreadPercent * 100).toFixed(4) + '%', liquidity: liquidityScore.toFixed(2), slippage: slippageRisk }
+    );
   }
 }
 

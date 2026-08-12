@@ -1,19 +1,38 @@
 'use client';
 
 import React, { useState } from 'react';
-import { MarketSnapshot, SymbolId, LLMDecision, Position } from '@/types/trading';
+import { MarketSnapshot, SymbolId, LLMDecision, Position, PortfolioState, DataStatus } from '@/types/trading';
 import { InteractiveChart } from './InteractiveChart';
-import { TrendingUp, ArrowUpRight, ArrowDownRight, Layers, ShoppingBag, Clock } from 'lucide-react';
+import { TrendingUp, ArrowUpRight, ArrowDownRight, Layers, ShoppingBag, Clock, Wallet, Wifi, WifiOff } from 'lucide-react';
+import { alpacaBrokerClient } from '@/lib/broker/alpaca';
 
 interface TerminalViewProps {
   snapshot: MarketSnapshot;
   symbols: SymbolId[];
   activeSymbol: SymbolId;
   onSelectSymbol: (symbol: SymbolId) => void;
-  decision: LLMDecision;
+  decision: LLMDecision | null;
   positions: Position[];
+  portfolio: PortfolioState | null;
   onExecuteManualTrade: (side: 'BUY' | 'SELL', size: number) => void;
   onClosePosition: (id: string) => void;
+}
+
+function StatusDot({ status, label }: { status: DataStatus; label?: string }) {
+  const colors: Record<DataStatus, string> = {
+    LIVE: 'bg-emerald-400', DELAYED: 'bg-amber-400', HISTORICAL: 'bg-blue-400',
+    SIMULATED: 'bg-orange-400', UNAVAILABLE: 'bg-gray-500', STALE: 'bg-rose-500 animate-pulse',
+  };
+  const textColors: Record<DataStatus, string> = {
+    LIVE: 'text-emerald-400', DELAYED: 'text-amber-400', HISTORICAL: 'text-blue-400',
+    SIMULATED: 'text-orange-400', UNAVAILABLE: 'text-gray-500', STALE: 'text-rose-400',
+  };
+  return (
+    <span className="flex items-center gap-1">
+      <span className={`w-1.5 h-1.5 rounded-full ${colors[status]}`} />
+      {label && <span className={`text-[10px] font-bold ${textColors[status]}`}>{label ?? status}</span>}
+    </span>
+  );
 }
 
 export const TerminalView: React.FC<TerminalViewProps> = ({
@@ -23,30 +42,53 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   onSelectSymbol,
   decision,
   positions,
+  portfolio,
   onExecuteManualTrade,
   onClosePosition,
 }) => {
   const [orderSide, setOrderSide] = useState<'BUY' | 'SELL'>('BUY');
   const [orderSize, setOrderSize] = useState<number>(0.1);
+  const hasAlpaca = alpacaBrokerClient.hasCredentials();
 
   return (
     <div className="space-y-6">
-      {/* Symbol Selection Watchlist Bar */}
-      <div className="flex items-center gap-3 overflow-x-auto pb-1">
-        {symbols.map((sym) => (
-          <button
-            key={sym}
-            onClick={() => onSelectSymbol(sym)}
-            className={`px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-all border ${
-              activeSymbol === sym
-                ? 'bg-blue-600 border-blue-400 text-white shadow-lg shadow-blue-600/30'
-                : 'glass-panel border-gray-800 text-gray-400 hover:text-white hover:border-gray-700'
-            }`}
-          >
-            <TrendingUp className="w-4 h-4" />
-            {sym}
-          </button>
-        ))}
+      {/* Symbol Selection Watchlist Bar & Account Balance Banner */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3 overflow-x-auto pb-1">
+          {symbols.map((sym) => (
+            <button
+              key={sym}
+              onClick={() => onSelectSymbol(sym)}
+              className={`px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-all border ${
+                activeSymbol === sym
+                  ? 'bg-blue-600 border-blue-400 text-white shadow-lg shadow-blue-600/30'
+                  : 'glass-panel border-gray-800 text-gray-400 hover:text-white hover:border-gray-700'
+              }`}
+            >
+              <TrendingUp className="w-4 h-4" />
+              {sym}
+            </button>
+          ))}
+        </div>
+
+        {/* Account Balance Banner */}
+        {portfolio ? (
+          <div className="glass-panel px-4 py-2 rounded-xl border border-gray-800 flex items-center gap-4 text-xs">
+            <div className="flex items-center gap-2">
+              <Wallet className="w-4 h-4 text-emerald-400" />
+              <span className="text-gray-400 font-semibold">{hasAlpaca ? 'Alpaca Buying Power:' : 'Buying Power:'}</span>
+              <strong className="text-white font-bold">${(portfolio.freeMargin || portfolio.equity).toLocaleString()}</strong>
+            </div>
+            <div className="text-gray-400">
+              Equity: <strong className="text-emerald-400">${portfolio.equity.toLocaleString()}</strong>
+            </div>
+            <div className={`ml-auto font-bold ${portfolio.totalPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              P&L: {portfolio.totalPnL >= 0 ? '+' : ''}${portfolio.totalPnL.toFixed(2)}
+            </div>
+          </div>
+        ) : (
+          <div className="glass-panel px-4 py-2 rounded-xl border border-gray-800 text-xs text-gray-500">Loading portfolio...</div>
+        )}
       </div>
 
       {/* Main Terminal Grid: Chart + Order Book + Order Form */}
@@ -71,9 +113,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
             <InteractiveChart
               candles={snapshot.candles}
-              entry={decision.entry}
-              stopLoss={decision.stopLoss}
-              takeProfit={decision.takeProfit}
+              entry={decision?.entry ?? null}
+              stopLoss={decision?.stopLoss ?? null}
+              takeProfit={decision?.takeProfit ?? null}
               height={380}
             />
           </div>
@@ -195,7 +237,23 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         {/* Paper Order Ticket Column (2 cols) */}
         <div className="lg:col-span-2 glass-panel p-4 rounded-2xl border border-gray-800 flex flex-col justify-between">
           <div>
-            <h4 className="text-sm font-bold text-white mb-3">Manual Ticket</h4>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-bold text-white">Manual Ticket</h4>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">
+                {hasAlpaca ? 'Alpaca' : 'Local'}
+              </span>
+            </div>
+
+            <div className="p-2.5 mb-3 bg-[#0B111E] rounded-xl border border-gray-800 text-[11px] space-y-1">
+              <div className="flex justify-between text-gray-400">
+                <span>Account Cash:</span>
+                <strong className="text-white">${portfolio?.balance.toLocaleString() ?? '—'}</strong>
+              </div>
+              <div className="flex justify-between text-gray-400">
+                <span>Buying Power:</span>
+                <strong className="text-emerald-400">${portfolio ? (portfolio.freeMargin || portfolio.equity).toLocaleString() : '—'}</strong>
+              </div>
+            </div>
 
             <div className="grid grid-cols-2 gap-2 mb-4">
               <button
@@ -254,7 +312,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                 : 'bg-rose-500 hover:bg-rose-400 text-white shadow-lg shadow-rose-500/30'
             }`}
           >
-            Submit Paper {orderSide}
+            Submit {hasAlpaca ? 'Alpaca' : 'Paper'} {orderSide}
           </button>
         </div>
       </div>

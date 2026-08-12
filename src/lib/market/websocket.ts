@@ -70,6 +70,9 @@ export class LiveMarketWebSocket {
               spread: parseFloat(spread.toFixed(4)),
               spreadPercent: parseFloat(spreadPercent.toFixed(4)),
               bidAskImbalance: parseFloat(bidAskImbalance.toFixed(3)),
+              bidDepth: bidTotal,
+              askDepth: askTotal,
+              midPrice: bids.length > 0 && asks.length > 0 ? (bids[0].price + asks[0].price) / 2 : 0,
             };
 
             this.onSnapshotCallback?.({ orderBook });
