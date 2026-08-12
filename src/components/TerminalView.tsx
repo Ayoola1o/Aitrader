@@ -6,7 +6,7 @@ import { BotState, BotConfig } from '@/lib/bot/engine';
 import { InteractiveChart } from './InteractiveChart';
 import {
   TrendingUp, ArrowUpRight, ArrowDownRight, Layers, ShoppingBag, Clock, Wallet,
-  Bot, Play, Square, AlertTriangle, CheckCircle, XCircle, RefreshCw, ChevronDown, ChevronUp, Terminal as TerminalIcon
+  Bot, Play, Square, AlertTriangle, CheckCircle, XCircle, RefreshCw, ChevronDown, ChevronUp, Terminal as TerminalIcon, DollarSign
 } from 'lucide-react';
 import { alpacaBrokerClient } from '@/lib/broker/alpaca';
 
@@ -68,6 +68,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
   // Spawn Modal Form state
   const [botSymbol, setBotSymbol] = useState<SymbolId>(activeSymbol);
+  const [allocatedCapital, setAllocatedCapital] = useState<number>(500);
   const [cycleInterval, setCycleInterval] = useState<number>(30);
   const [maxNoTrades, setMaxNoTrades] = useState<number>(5);
   const [maxLosses, setMaxLosses] = useState<number>(3);
@@ -81,6 +82,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     e.preventDefault();
     onSpawnBot({
       symbol: botSymbol,
+      allocatedCapital: allocatedCapital || 500,
       cycleIntervalSeconds: cycleInterval,
       maxConsecutiveNoTrades: maxNoTrades,
       maxConsecutiveLosses: maxLosses,
@@ -115,10 +117,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
               </div>
               <p className="text-xs text-gray-400 mt-0.5">
                 {isBotRunning
-                  ? `Looping on ${botState.symbol} · Cycle #${botState.cycleCount} · Last trade: ${botState.lastAction}`
+                  ? `Looping on ${botState.symbol} ($${botState.allocatedCapital.toLocaleString()} Capital) · Cycle #${botState.cycleCount} · Last trade: ${botState.lastAction}`
                   : isBotPaused
                   ? `PAUSED — Bot is requesting exit from market`
-                  : 'Spawn an AI bot to autonomously analyze and trade this market until exit criteria are met.'}
+                  : 'Spawn an AI bot with allocated investment capital to autonomously analyze and trade this market.'}
               </p>
             </div>
           </div>
@@ -155,10 +157,14 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
         {/* Live Bot Stats Ribbon (when running or paused) */}
         {(isBotRunning || isBotPaused) && (
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-3 border-t border-gray-800 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 pt-3 border-t border-gray-800 text-xs">
             <div className="p-2.5 bg-[#0B111E] rounded-xl border border-gray-800">
               <span className="text-gray-500 block text-[10px]">Symbol</span>
               <strong className="text-white font-bold">{botState.symbol}</strong>
+            </div>
+            <div className="p-2.5 bg-[#0B111E] rounded-xl border border-gray-800">
+              <span className="text-gray-500 block text-[10px]">Allocated Capital</span>
+              <strong className="text-emerald-400 font-bold">${botState.allocatedCapital.toLocaleString()}</strong>
             </div>
             <div className="p-2.5 bg-[#0B111E] rounded-xl border border-gray-800">
               <span className="text-gray-500 block text-[10px]">Cycles Completed</span>
@@ -236,6 +242,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                 <strong className="text-white font-bold">{botState.symbol}</strong>
               </div>
               <div className="flex justify-between">
+                <span className="text-gray-400">Allocated Capital:</span>
+                <strong className="text-emerald-400 font-bold">${botState.allocatedCapital.toLocaleString()}</strong>
+              </div>
+              <div className="flex justify-between">
                 <span className="text-gray-400">Session P&L:</span>
                 <strong className={botState.runningPnL >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
                   {botState.runningPnL >= 0 ? '+' : ''}${botState.runningPnL.toFixed(2)}
@@ -297,6 +307,30 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                 >
                   {symbols.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
+              </div>
+
+              <div>
+                <label className="text-gray-400 block mb-1 font-semibold flex items-center justify-between">
+                  <span>Allocated Bot Capital ($ USD)</span>
+                  <span className="text-[10px] text-emerald-400 font-normal">
+                    Buying Power: ${portfolio ? (portfolio.freeMargin || portfolio.equity).toLocaleString() : '10,000'}
+                  </span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2 text-gray-400 font-bold text-sm">$</span>
+                  <input
+                    type="number"
+                    min={10}
+                    step={50}
+                    value={allocatedCapital}
+                    onChange={(e) => setAllocatedCapital(Math.max(10, Number(e.target.value)))}
+                    className="w-full bg-[#0B111E] border border-gray-800 rounded-xl pl-7 pr-3 py-2 text-white font-bold"
+                    placeholder="500"
+                  />
+                </div>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Amount of money assigned to this bot session for calculating position sizes and risk limits.
+                </p>
               </div>
 
               <div>
@@ -366,7 +400,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                 className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white font-extrabold text-xs transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-1.5"
               >
                 <Play className="w-3.5 h-3.5 fill-current" />
-                Launch Bot
+                Launch Bot ($${allocatedCapital})
               </button>
             </div>
           </form>

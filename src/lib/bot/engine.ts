@@ -30,6 +30,7 @@ export interface BotExitRequest {
 export interface BotState {
   status: BotStatus;
   symbol: SymbolId;
+  allocatedCapital: number;
   cycleCount: number;
   tradesExecuted: number;
   lastAction: string;
@@ -48,7 +49,8 @@ export interface BotState {
 
 export interface BotConfig {
   symbol: SymbolId;
-  cycleIntervalSeconds: number; // 30 | 60 | 120
+  allocatedCapital: number;      // Capital allocated to bot in USD (e.g. 500)
+  cycleIntervalSeconds: number; // 15 | 30 | 60 | 120
   maxConsecutiveNoTrades: number; // 3 | 5 | 10
   maxConsecutiveLosses: number;  // 2 | 3 | 5
   autoConfirmExit: boolean;
@@ -56,6 +58,7 @@ export interface BotConfig {
 
 const DEFAULT_CONFIG: BotConfig = {
   symbol: 'BTCUSDT',
+  allocatedCapital: 1000,
   cycleIntervalSeconds: 30,
   maxConsecutiveNoTrades: 5,
   maxConsecutiveLosses: 3,
@@ -88,9 +91,10 @@ export class TradingBotEngine {
       ...this.makeIdleState(),
       status: 'RUNNING',
       symbol: cfg.symbol,
+      allocatedCapital: cfg.allocatedCapital,
       startedAt: Date.now(),
     };
-    this.log('INFO', `Bot spawned on ${cfg.symbol} — cycle every ${cfg.cycleIntervalSeconds}s`);
+    this.log('INFO', `Bot spawned on ${cfg.symbol} with $${cfg.allocatedCapital.toLocaleString()} capital — cycle every ${cfg.cycleIntervalSeconds}s`);
     this.push();
     this.scheduleCycle(0); // run immediately
   }
@@ -110,7 +114,6 @@ export class TradingBotEngine {
     this.log('ACTION', 'Closing all open positions…');
     this.push();
 
-    const snapshot = this.state.currentDecision;
     const price = this.state.currentPrice;
     const positions = paperBroker.getPositions();
     for (const pos of positions) {
@@ -188,13 +191,13 @@ export class TradingBotEngine {
       const port = await this.getPortfolio(sym, snap.price);
       this.state.runningPnL = port.totalPnL;
 
-      // 6. Risk gate
+      // 6. Risk check
       const risk = deterministicRiskEngine.evaluate(dec, port, snap, feat);
       this.state.currentRiskCheck = risk;
 
       // 7. Execute trade if approved
       if (risk.approved && (dec.action === 'BUY' || dec.action === 'SELL')) {
-        await this.executeTrade(sym, dec, risk, snap);
+        await this.executeTrade(sym, dec, risk, snap, port);
       } else if (dec.action === 'NO_TRADE' || dec.action === 'HOLD') {
         this.state.consecutiveNoTrades++;
         this.log('INFO', `No trade: ${dec.action} — ${dec.reasoning[0] ?? 'Conditions not met'}`);
@@ -225,10 +228,24 @@ export class TradingBotEngine {
     sym: SymbolId,
     dec: LLMDecision,
     risk: RiskCheckResult,
-    snap: MarketSnapshot
+    snap: MarketSnapshot,
+    port: PortfolioState
   ) {
     const side = dec.action === 'BUY' ? 'BUY' : 'SELL';
-    const size = risk.calculatedPositionSize > 0 ? risk.calculatedPositionSize : 0.001;
+    
+    // Position sizing based on user's allocatedCapital
+    const capital = Math.min(this.config.allocatedCapital, port.freeMargin || this.config.allocatedCapital);
+    const capitalSizeUnits = snap.price > 0 ? capital / snap.price : 0.001;
+
+    // Use smaller of risk-calculated size or allocated capital size
+    let size = risk.calculatedPositionSize > 0 
+      ? Math.min(risk.calculatedPositionSize, capitalSizeUnits) 
+      : capitalSizeUnits;
+    
+    // Precision format per symbol
+    size = Number(size.toFixed(sym === 'BTCUSDT' ? 4 : sym === 'ETHUSDT' ? 3 : 2));
+    if (size <= 0) size = 0.001;
+
     const sl = dec.stopLoss ?? (dec.action === 'BUY' ? snap.price * 0.985 : snap.price * 1.015);
     const tp = dec.takeProfit ?? (dec.action === 'BUY' ? snap.price * 1.03 : snap.price * 0.97);
 
@@ -246,8 +263,9 @@ export class TradingBotEngine {
     if (success) {
       this.state.tradesExecuted++;
       this.state.consecutiveNoTrades = 0;
-      this.state.lastAction = `${side} ${size.toFixed(4)} @ $${snap.price.toLocaleString()} [${new Date().toLocaleTimeString()}]`;
-      this.log('ACTION', `✓ EXECUTED: ${side} ${size.toFixed(4)} ${sym} @ $${snap.price.toLocaleString()} — SL:$${sl.toFixed(2)} TP:$${tp.toFixed(2)}`);
+      const notionalVal = (size * snap.price).toFixed(2);
+      this.state.lastAction = `${side} ${size} ${sym} ($${notionalVal}) [${new Date().toLocaleTimeString()}]`;
+      this.log('ACTION', `✓ EXECUTED: ${side} ${size} ${sym} (~$${notionalVal} of $${this.config.allocatedCapital} capital) — SL:$${sl.toFixed(2)} TP:$${tp.toFixed(2)}`);
     } else {
       this.state.consecutiveNoTrades++;
       this.log('WARN', `Execution failed: ${msg}`);
@@ -288,8 +306,8 @@ export class TradingBotEngine {
     if (port.dailyDrawdownPercent >= 5) {
       return { reason: `Daily drawdown ${port.dailyDrawdownPercent.toFixed(2)}% hit the 5% limit`, urgent: true, triggeredAt: Date.now() };
     }
-    if (this.initialEquity > 0 && port.equity <= this.initialEquity * 0.85) {
-      return { reason: `Account down ${((1 - port.equity / this.initialEquity) * 100).toFixed(1)}% from start — emergency halt`, urgent: true, triggeredAt: Date.now() };
+    if (this.config.allocatedCapital > 0 && Math.abs(this.state.runningPnL) >= this.config.allocatedCapital * 0.20 && this.state.runningPnL < 0) {
+      return { reason: `Bot session loss reached -$${Math.abs(this.state.runningPnL).toFixed(2)} (20% of allocated capital $${this.config.allocatedCapital})`, urgent: true, triggeredAt: Date.now() };
     }
     if (this.state.consecutiveLosses >= this.config.maxConsecutiveLosses) {
       return { reason: `${this.state.consecutiveLosses} consecutive losing trades hit the limit of ${this.config.maxConsecutiveLosses}`, urgent: false, triggeredAt: Date.now() };
@@ -335,7 +353,7 @@ export class TradingBotEngine {
 
   private makeIdleState(): BotState {
     return {
-      status: 'IDLE', symbol: 'BTCUSDT', cycleCount: 0, tradesExecuted: 0,
+      status: 'IDLE', symbol: 'BTCUSDT', allocatedCapital: 1000, cycleCount: 0, tradesExecuted: 0,
       lastAction: 'Not started', lastDecisionAction: '—', runningPnL: 0,
       consecutiveNoTrades: 0, consecutiveLosses: 0, startedAt: null,
       lastCycleAt: null, exitRequest: null, log: [], currentDecision: null,
