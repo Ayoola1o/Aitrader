@@ -15,6 +15,7 @@ import { deterministicRiskEngine } from '@/lib/risk/engine';
 import { paperBroker } from '@/lib/broker/paper';
 import { alpacaBrokerClient } from '@/lib/broker/alpaca';
 import { dbPersistence, generateDecisionId } from '@/lib/db/schema';
+import { tradingBotEngine, BotState, BotConfig } from '@/lib/bot/engine';
 
 import { DashboardView } from '@/components/DashboardView';
 import { TerminalView } from '@/components/TerminalView';
@@ -51,8 +52,19 @@ export default function Home() {
   const [notification, setNotification] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
 
+  // Bot State Sync
+  const [botState, setBotState] = useState<BotState>(tradingBotEngine.getState());
+
   const activeSymbolRef = useRef(activeSymbol);
   activeSymbolRef.current = activeSymbol;
+
+  // ── Bot Sync Subscription ──────────────────────────────────────────────────
+  useEffect(() => {
+    tradingBotEngine.onStateUpdate((s) => setBotState(s));
+    tradingBotEngine.onExitRequest((req) => {
+      showNotification(`⚠️ Bot Alert: ${req.reason}`);
+    });
+  }, []);
 
   // ── Boot: Load persistent credentials ─────────────────────────────────────
   useEffect(() => {
@@ -230,6 +242,28 @@ export default function Home() {
     await updateMarket();
   };
 
+  // Bot Handlers
+  const handleSpawnBot = (config: BotConfig) => {
+    tradingBotEngine.start(config);
+    showNotification(`🤖 Bot spawned for ${config.symbol} (cycle every ${config.cycleIntervalSeconds}s)`);
+  };
+
+  const handleStopBot = () => {
+    tradingBotEngine.stop();
+    showNotification(`⏹ Trading Bot stopped`);
+  };
+
+  const handleConfirmBotExit = () => {
+    tradingBotEngine.confirmExit();
+    showNotification(`✓ Bot exited market and closed positions`);
+    updateMarket();
+  };
+
+  const handleResumeBot = () => {
+    tradingBotEngine.resumeFromExitRequest();
+    showNotification(`↺ Bot resumed trading loop`);
+  };
+
   // ── Data quality helpers ───────────────────────────────────────────────────
   const dataScore = snapshot?.dataQuality.overallScore ?? 0;
   const isCritical = snapshot?.dataQuality.criticalStale ?? false;
@@ -363,6 +397,11 @@ export default function Home() {
             portfolio={portfolio}
             onExecuteManualTrade={handleExecuteManualTrade}
             onClosePosition={handleClosePosition}
+            botState={botState}
+            onSpawnBot={handleSpawnBot}
+            onStopBot={handleStopBot}
+            onConfirmBotExit={handleConfirmBotExit}
+            onResumeBot={handleResumeBot}
           />
         )}
 
