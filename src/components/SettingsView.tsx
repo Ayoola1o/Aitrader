@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Settings, Shield, Cpu, Check, Download, Wifi, Key, Database, DollarSign } from 'lucide-react';
+import { Settings, Shield, Cpu, Check, Download, Wifi, Key, Database, DollarSign, RefreshCw, CheckCircle, XCircle } from 'lucide-react';
 import { aiProviderManager, AIProviderId } from '@/lib/llm/providers';
 import { dbPersistence } from '@/lib/db/schema';
 import { paperBroker } from '@/lib/broker/paper';
 import { alpacaBrokerClient } from '@/lib/broker/alpaca';
 import { AppMode } from '@/types/trading';
 import { deterministicRiskEngine } from '@/lib/risk/engine';
+import { supabaseManager } from '@/lib/db/supabase';
 
 interface SettingsViewProps {
   onModeChange?: (mode: AppMode) => void;
@@ -27,10 +28,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCred
     }
     return 10000;
   });
-  const [takerFee, setTakerFee] = useState<number>(0.05);
-  const [slippagePct, setSlippagePct] = useState<number>(0.02);
 
-  // Synchronous initializers from localStorage
+  // Alpaca API Credentials
   const [alpacaApiKey, setAlpacaApiKey] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('aitrader_alpaca_api_key') || '';
@@ -51,6 +50,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCred
 
   const [alpacaStatus, setAlpacaStatus] = useState<string | null>(null);
 
+  // Supabase PostgreSQL Credentials
+  const [supabaseUrl, setSupabaseUrl] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('aitrader_supabase_url') || '';
+    }
+    return '';
+  });
+
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('aitrader_supabase_anon_key') || '';
+    }
+    return '';
+  });
+
+  const [supabaseStatus, setSupabaseStatus] = useState<{ success?: boolean; message: string } | null>(null);
+  const [isTestingSupabase, setIsTestingSupabase] = useState<boolean>(false);
+
+  // AI Provider Credentials
   const [aiProvider, setAiProvider] = useState<AIProviderId>(() => {
     if (typeof window !== 'undefined') {
       return (localStorage.getItem('aitrader_ai_provider') as AIProviderId) || 'mock';
@@ -78,7 +96,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCred
       setUseAlpacaBroker(true);
       setAlpacaStatus('Alpaca Credentials Loaded & Active.');
     }
+
+    if (supabaseUrl && supabaseAnonKey) {
+      supabaseManager.setCredentials(supabaseUrl, supabaseAnonKey);
+    }
   }, []);
+
+  const handleTestSupabase = async () => {
+    setIsTestingSupabase(true);
+    supabaseManager.setCredentials(supabaseUrl.trim(), supabaseAnonKey.trim());
+    const res = await supabaseManager.testConnection();
+    setSupabaseStatus(res);
+    setIsTestingSupabase(false);
+  };
 
   const handleSave = async () => {
     if (typeof window !== 'undefined') {
@@ -87,7 +117,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCred
       localStorage.setItem('aitrader_ai_provider', aiProvider);
       localStorage.setItem('aitrader_ai_api_key', apiKey.trim());
       localStorage.setItem('aitrader_starting_balance', startingBalance.toString());
+      localStorage.setItem('aitrader_supabase_url', supabaseUrl.trim());
+      localStorage.setItem('aitrader_supabase_anon_key', supabaseAnonKey.trim());
     }
+
+    // Configure Supabase Client
+    supabaseManager.setCredentials(supabaseUrl.trim(), supabaseAnonKey.trim());
 
     // Configure AI Provider
     aiProviderManager.setConfig({
@@ -131,8 +166,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCred
     setTimeout(() => setSaved(false), 2500);
   };
 
-
-
   const handleExportDecisions = () => {
     const csv = dbPersistence.exportDecisionsToCSV();
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -150,92 +183,212 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCred
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `paper_trades_${Date.now()}.csv`;
+    a.download = `ai_quant_trades_${Date.now()}.csv`;
     a.click();
   };
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
-      {/* Title */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 max-w-5xl">
+      {/* Top Banner */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Settings className="w-6 h-6 text-gray-400" />
-            System Configuration & Persistent Credentials
+            <Settings className="w-6 h-6 text-blue-400" />
+            Quant Engine & Platform Settings
           </h2>
-          <p className="text-xs text-gray-400">
-            Configure Alpaca Paper Trading API keys, real live market data sources, and LLM API keys. Keys save permanently in your browser.
+          <p className="text-xs text-gray-400 mt-1">
+            Configure risk parameters, cloud database storage, API integrations, and execution credentials.
           </p>
         </div>
+
         <button
           onClick={handleSave}
-          className="px-5 py-2.5 rounded-xl font-bold text-sm bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/30 flex items-center gap-2 transition-all"
+          className={`px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all shadow-lg ${
+            saved
+              ? 'bg-emerald-500 text-white shadow-emerald-500/30'
+              : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-600/30'
+          }`}
         >
-          {saved ? <Check className="w-4 h-4 text-emerald-300" /> : null}
-          {saved ? 'Saved Successfully!' : 'Save Credentials'}
+          {saved ? <Check className="w-4 h-4" /> : null}
+          {saved ? 'Saved Successfully!' : 'Save All Settings'}
         </button>
       </div>
 
-      {/* Alpaca Paper Trading Credentials Card */}
+      {/* Grid: Broker & Starting Balance */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Alpaca Broker Configuration Card */}
+        <div className="glass-panel p-6 rounded-2xl border border-gray-800 space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-gray-800">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <DollarSign className="w-5 h-5 text-emerald-400" />
+              Alpaca Paper & Live Broker
+            </h3>
+            <span className={`text-[10px] px-2 py-0.5 rounded font-bold border ${
+              useAlpacaBroker ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : 'border-gray-700 bg-gray-800 text-gray-400'
+            }`}>
+              {useAlpacaBroker ? 'CONNECTED' : 'LOCAL SIM'}
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Alpaca API Key ID</label>
+              <input
+                type="text"
+                placeholder="PK..."
+                value={alpacaApiKey}
+                onChange={(e) => setAlpacaApiKey(e.target.value)}
+                className="w-full bg-[#0B111E] border border-gray-800 rounded-lg px-3 py-2 text-xs text-white font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Alpaca Secret Key</label>
+              <input
+                type="password"
+                placeholder="Secret key..."
+                value={alpacaSecretKey}
+                onChange={(e) => setAlpacaSecretKey(e.target.value)}
+                className="w-full bg-[#0B111E] border border-gray-800 rounded-lg px-3 py-2 text-xs text-white font-mono"
+              />
+            </div>
+
+            {alpacaStatus && (
+              <p className="text-[11px] text-gray-400 bg-[#0B111E] p-2.5 rounded-lg border border-gray-800">
+                {alpacaStatus}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Paper Starting Balance & Capital Setting */}
+        <div className="glass-panel p-6 rounded-2xl border border-gray-800 space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-gray-800">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <DollarSign className="w-5 h-5 text-blue-400" />
+              Starting Paper Balance
+            </h3>
+            <span className="text-[10px] px-2 py-0.5 rounded font-bold border border-blue-500/40 bg-blue-500/10 text-blue-400">
+              SIMULATED
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Initial Account Equity ($ USD)</label>
+              <input
+                type="number"
+                step="1000"
+                min="100"
+                value={startingBalance}
+                onChange={(e) => setStartingBalance(Number(e.target.value))}
+                className="w-full bg-[#0B111E] border border-gray-800 rounded-lg px-3 py-2 text-xs text-white font-bold"
+              />
+              <p className="text-[11px] text-gray-500 mt-1">
+                Used to initialize the local Paper Broker accounting ledger when Alpaca keys are not configured.
+              </p>
+            </div>
+
+            <div className="p-3 bg-[#0B111E] rounded-xl border border-gray-800 text-xs text-gray-400 space-y-1">
+              <div className="flex justify-between">
+                <span>Commission / Taker Fee:</span>
+                <strong className="text-white">0.05% per fill</strong>
+              </div>
+              <div className="flex justify-between">
+                <span>Simulated Market Slippage:</span>
+                <strong className="text-white">0.03% (3 bps)</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Cloud Database (Supabase PostgreSQL) Section */}
       <div className="glass-panel p-6 rounded-2xl border border-gray-800 space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between pb-3 border-b border-gray-800">
           <h3 className="text-base font-bold text-white flex items-center gap-2">
             <Database className="w-5 h-5 text-emerald-400" />
-            Alpaca Paper Trading API Configuration
+            Cloud Database (Supabase PostgreSQL)
           </h3>
-          <span className={`text-xs px-2.5 py-1 rounded font-bold ${useAlpacaBroker ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-gray-800 text-gray-400 border border-gray-700'}`}>
-            {useAlpacaBroker ? 'Alpaca Account Active' : 'Local Paper Broker'}
+          <span className={`text-[10px] px-2 py-0.5 rounded font-bold border ${
+            supabaseUrl && supabaseAnonKey ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : 'border-gray-700 bg-gray-800 text-gray-400'
+          }`}>
+            {supabaseUrl && supabaseAnonKey ? 'CONFIGURED' : 'LOCAL CACHE ONLY'}
           </span>
         </div>
 
+        <p className="text-xs text-gray-400">
+          Sync all AI decision audit logs, bot session telemetry, executed trades, and positions to a cloud PostgreSQL database for persistent, multi-device access.
+        </p>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="text-xs text-gray-400 block mb-1">Alpaca API Key ID</label>
+            <label className="text-xs text-gray-400 block mb-1">Supabase Project URL</label>
             <input
               type="text"
-              placeholder="PK..."
-              value={alpacaApiKey}
-              onChange={(e) => setAlpacaApiKey(e.target.value)}
+              placeholder="https://xyzcompany.supabase.co"
+              value={supabaseUrl}
+              onChange={(e) => setSupabaseUrl(e.target.value)}
               className="w-full bg-[#0B111E] border border-gray-800 rounded-lg px-3 py-2 text-xs text-white font-mono"
             />
           </div>
 
           <div>
-            <label className="text-xs text-gray-400 block mb-1">Alpaca Secret Key</label>
+            <label className="text-xs text-gray-400 block mb-1">Supabase Public / Anon API Key</label>
             <input
               type="password"
-              placeholder="Secret..."
-              value={alpacaSecretKey}
-              onChange={(e) => setAlpacaSecretKey(e.target.value)}
+              placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              value={supabaseAnonKey}
+              onChange={(e) => setSupabaseAnonKey(e.target.value)}
               className="w-full bg-[#0B111E] border border-gray-800 rounded-lg px-3 py-2 text-xs text-white font-mono"
             />
           </div>
         </div>
 
-        {alpacaStatus && (
-          <div className="p-3 bg-[#0B111E] border border-gray-800 rounded-xl text-xs font-semibold text-emerald-400 flex items-center gap-2">
-            <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>{alpacaStatus}</span>
-          </div>
-        )}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+          <button
+            type="button"
+            onClick={handleTestSupabase}
+            disabled={isTestingSupabase || !supabaseUrl || !supabaseAnonKey}
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-[#0B111E] border border-gray-800 hover:border-gray-700 text-gray-300 flex items-center gap-1.5 transition-all disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isTestingSupabase ? 'animate-spin' : ''}`} />
+            Test Supabase Connection
+          </button>
+
+          {supabaseStatus && (
+            <div className={`flex items-center gap-1.5 text-xs font-semibold ${
+              supabaseStatus.success ? 'text-emerald-400' : 'text-rose-400'
+            }`}>
+              {supabaseStatus.success ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+              {supabaseStatus.message}
+            </div>
+          )}
+        </div>
+
+        <p className="text-[11px] text-gray-500 pt-1">
+          💡 Database schema migration script is located at <code className="text-blue-400 font-mono">src/lib/db/migrations/001_initial_trading_schema.sql</code>. Run it once in your Supabase SQL editor to create all tables and indexes.
+        </p>
       </div>
 
-      {/* Live Market Data & LLM API Provider Settings */}
+      {/* Grid: Data Source & AI Provider */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Live Market Data Source */}
         <div className="glass-panel p-6 rounded-2xl border border-gray-800 space-y-4">
           <h3 className="text-base font-bold text-white flex items-center gap-2">
             <Wifi className="w-5 h-5 text-emerald-400" />
-            Live Market Data Source
+            Market Data Source
           </h3>
           <div className="flex items-center justify-between p-3 bg-[#0B111E] rounded-xl border border-gray-800">
             <div>
-              <span className="text-sm font-bold text-white block">Market Data Source</span>
-              <span className="text-xs text-gray-400">Binance REST (primary) → Alpaca REST (fallback). WebSocket streams when available.</span>
+              <span className="text-sm font-bold text-white block">Exchange Live Stream</span>
+              <span className="text-xs text-gray-400">Binance REST (primary) → Alpaca REST (fallback). STALE indicator on delay.</span>
             </div>
             <span className="text-[10px] px-2 py-1 rounded bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30">AUTO</span>
           </div>
         </div>
 
+        {/* LLM Provider Configuration */}
         <div className="glass-panel p-6 rounded-2xl border border-gray-800 space-y-4">
           <h3 className="text-base font-bold text-white flex items-center gap-2">
             <Key className="w-5 h-5 text-purple-400" />
