@@ -139,7 +139,7 @@ export default function Home() {
             equity: acc.equity,
             marginUsed: 0,
             freeMargin: acc.buyingPower,
-            unrealizedPnL: alpacaPositions.reduce((s, p) => s + p.unrealizedPnL, 0),
+            unrealizedPnL: alpacaPositions.reduce((s: number, p: Position) => s + p.unrealizedPnL, 0),
             totalPnL: acc.equity - parseFloat(localStorage.getItem('aitrader_starting_balance') ?? '100000'),
             totalPnLPercent: 0,
             dailyPnL: 0,
@@ -402,6 +402,12 @@ export default function Home() {
             onStopBot={handleStopBot}
             onConfirmBotExit={handleConfirmBotExit}
             onResumeBot={handleResumeBot}
+            signals={signals}
+            fusion={fusion}
+            riskCheck={riskCheck}
+            orders={orders}
+            tradeHistory={tradeHistory}
+            features={features}
           />
         )}
 

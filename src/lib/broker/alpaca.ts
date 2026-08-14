@@ -1,174 +1,184 @@
-import { SymbolId, Position, Order, PortfolioState } from '@/types/trading';
+import { createClient } from '@supabase/supabase-js';
 
+// Global Supabase client (already used elsewhere)
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+/**
+ * Alpaca REST wrapper – supports global credentials from .env
+ * as well as per‑bot credential overrides.
+ */
 export interface AlpacaCredentials {
-  apiKeyId: string;
-  secretKey: string;
-  isPaper: boolean;
+  key: string;
+  secret: string;
+  isPaper?: boolean;
 }
 
-export class AlpacaBrokerClient {
-  private credentials: AlpacaCredentials | null = null;
+export interface AlpacaOrderParams {
+  symbol: string;
+  side: 'buy' | 'sell';
+  qty: number;
+  type?: 'market' | 'limit';
+  time_in_force?: 'day' | 'gtc';
+  limit_price?: number;
+}
 
-  public setCredentials(creds: AlpacaCredentials) {
-    this.credentials = creds;
+/**
+ * Internal helper to build request headers.
+ */
+function buildHeaders(creds: AlpacaCredentials) {
+  return {
+    'APCA-API-KEY-ID': creds.key,
+    'APCA-API-SECRET-KEY': creds.secret,
+    'Content-Type': 'application/json',
+  };
+}
+
+/**
+ * Internal helper to get the base URL based on environment.
+ */
+function getBaseUrl(isPaper: boolean = true) {
+  return isPaper 
+    ? 'https://paper-api.alpaca.markets/v2' 
+    : 'https://api.alpaca.markets/v2';
+}
+
+/**
+ * Place an order on Alpaca. If `overrideCreds` is provided the request
+ * uses those credentials; otherwise it falls back to the global env vars.
+ */
+export async function placeAlpacaOrder(
+  params: AlpacaOrderParams,
+  overrideCreds?: AlpacaCredentials
+): Promise<any> {
+  const creds: AlpacaCredentials = overrideCreds || {
+    key: process.env.NEXT_PUBLIC_ALPACA_API_KEY || '',
+    secret: process.env.NEXT_PUBLIC_ALPACA_SECRET_KEY || '',
+    isPaper: process.env.NEXT_PUBLIC_ALPACA_PAPER === 'true',
+  };
+
+  if (!creds.key || !creds.secret) {
+    throw new Error('Alpaca API credentials are missing');
   }
 
-  public hasCredentials(): boolean {
-    if (this.credentials && this.credentials.apiKeyId && this.credentials.secretKey) {
-      return true;
-    }
-    if (typeof window !== 'undefined') {
-      const key = localStorage.getItem('aitrader_alpaca_api_key');
-      const secret = localStorage.getItem('aitrader_alpaca_secret_key');
-      if (key && secret) {
-        this.credentials = { apiKeyId: key, secretKey: secret, isPaper: true };
-        return true;
-      }
-    }
-    return false;
+  const url = `${getBaseUrl(creds.isPaper)}/orders`;
+  const body = {
+    symbol: params.symbol,
+    side: params.side,
+    qty: params.qty,
+    type: params.type ?? 'market',
+    time_in_force: params.time_in_force ?? 'day',
+    ...(params.limit_price && { limit_price: params.limit_price }),
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: buildHeaders(creds),
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Alpaca order failed: ${res.status} ${err}`);
   }
 
-  private getHeaders(): HeadersInit {
-    if (!this.hasCredentials() || !this.credentials) {
-      throw new Error('Alpaca credentials not configured.');
-    }
-    return {
-      'APCA-API-KEY-ID': this.credentials.apiKeyId,
-      'APCA-API-SECRET-KEY': this.credentials.secretKey,
-      'Content-Type': 'application/json',
-    };
+  return await res.json();
+}
+
+/**
+ * Cancel an existing Alpaca order.
+ */
+export async function cancelAlpacaOrder(
+  orderId: string,
+  overrideCreds?: AlpacaCredentials
+): Promise<void> {
+  const creds: AlpacaCredentials = overrideCreds || {
+    key: process.env.NEXT_PUBLIC_ALPACA_API_KEY || '',
+    secret: process.env.NEXT_PUBLIC_ALPACA_SECRET_KEY || '',
+    isPaper: process.env.NEXT_PUBLIC_ALPACA_PAPER === 'true',
+  };
+
+  const url = `${getBaseUrl(creds.isPaper)}/orders/${orderId}`;
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: buildHeaders(creds),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Alpaca cancel failed: ${res.status} ${err}`);
+  }
+}
+
+/**
+ * Fetch open orders – used for UI status refresh.
+ */
+export async function fetchOpenAlpacaOrders(
+  overrideCreds?: AlpacaCredentials
+): Promise<any[]> {
+  const creds: AlpacaCredentials = overrideCreds || {
+    key: process.env.NEXT_PUBLIC_ALPACA_API_KEY || '',
+    secret: process.env.NEXT_PUBLIC_ALPACA_SECRET_KEY || '',
+    isPaper: process.env.NEXT_PUBLIC_ALPACA_PAPER === 'true',
+  };
+
+  const url = `${getBaseUrl(creds.isPaper)}/orders?status=open`;
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: buildHeaders(creds),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Alpaca fetch open orders failed: ${res.status} ${err}`);
   }
 
-  private getBaseUrl(): string {
-    return this.credentials?.isPaper !== false
-      ? 'https://paper-api.alpaca.markets'
-      : 'https://api.alpaca.markets';
-  }
+  return await res.json();
+}
+// Simple Alpaca client wrapper
+let storedCreds: AlpacaCredentials | null = null;
 
-  public async getAccount(): Promise<{
-    equity: number;
-    balance: number;
-    buyingPower: number;
-  }> {
-    if (!this.hasCredentials()) {
-      throw new Error('Alpaca credentials missing');
-    }
-
-    const res = await fetch(`${this.getBaseUrl()}/v2/account`, {
-      headers: this.getHeaders(),
-    });
-
+export const alpacaBrokerClient = {
+  setCredentials(creds: { apiKeyId: string; secretKey: string; isPaper?: boolean }) {
+    storedCreds = { key: creds.apiKeyId, secret: creds.secretKey, isPaper: creds.isPaper ?? true };
+  },
+  hasCredentials() {
+    return !!storedCreds?.key && !!storedCreds?.secret;
+  },
+  async getAccount() {
+    if (!storedCreds) throw new Error('Alpaca credentials not set');
+    const url = `${getBaseUrl(storedCreds.isPaper ?? true)}/account`;
+    const res = await fetch(url, { method: 'GET', headers: buildHeaders(storedCreds) });
     if (!res.ok) {
       const err = await res.text();
-      throw new Error(`Alpaca Account Error: ${err}`);
+      throw new Error(`Alpaca getAccount failed: ${res.status} ${err}`);
     }
-
-    const data = await res.json();
-    return {
-      equity: parseFloat(data.equity || '10000'),
-      balance: parseFloat(data.cash || '10000'),
-      buyingPower: parseFloat(data.buying_power || '40000'),
-    };
-  }
-
-  public async getPositions(): Promise<Position[]> {
-    if (!this.hasCredentials()) return [];
-
-    try {
-      const res = await fetch(`${this.getBaseUrl()}/v2/positions`, {
-        headers: this.getHeaders(),
-      });
-
-      if (!res.ok) return [];
-
-      const data = await res.json();
-      return data.map((p: any) => {
-        const entryPrice = parseFloat(p.avg_entry_price);
-        const currentPrice = parseFloat(p.current_price);
-        const qty = Math.abs(parseFloat(p.qty));
-        const side = parseFloat(p.qty) >= 0 ? 'LONG' : 'SHORT';
-        const unrealizedPnL = parseFloat(p.unrealized_pl);
-
-        return {
-          id: p.asset_id || p.symbol,
-          symbol: p.symbol as SymbolId,
-          side,
-          entryPrice,
-          currentPrice,
-          size: qty,
-          leverage: 1,
-          stopLoss: side === 'LONG' ? entryPrice * 0.985 : entryPrice * 1.015,
-          takeProfit: side === 'LONG' ? entryPrice * 1.035 : entryPrice * 0.965,
-          unrealizedPnL: Number(unrealizedPnL.toFixed(2)),
-          unrealizedPnLPercent: Number(((unrealizedPnL / (entryPrice * qty)) * 100).toFixed(2)),
-          liquidationPrice: side === 'LONG' ? entryPrice * 0.8 : entryPrice * 1.2,
-          openedAt: Date.now(),
-        };
-      });
-    } catch {
-      return [];
+    return await res.json();
+  },
+  async getPositions() {
+    if (!storedCreds) throw new Error('Alpaca credentials not set');
+    const url = `${getBaseUrl(storedCreds.isPaper ?? true)}/positions`;
+    const res = await fetch(url, { method: 'GET', headers: buildHeaders(storedCreds) });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Alpaca getPositions failed: ${res.status} ${err}`);
     }
-  }
-
-  public async submitOrder(
-    symbol: string,
-    qty: number,
-    side: 'buy' | 'sell',
-    type: 'market' | 'limit' = 'market',
-    limitPrice?: number
-  ): Promise<{ success: boolean; message: string }> {
-    if (!this.hasCredentials()) {
-      return { success: false, message: 'Alpaca API credentials missing.' };
+    return await res.json();
+  },
+  async submitOrder(symbol: string, qty: number, side: 'buy' | 'sell', type: 'market' | 'limit' = 'market') {
+    return await placeAlpacaOrder({ symbol, side, qty, type }, storedCreds ?? undefined);
+  },
+  async closePosition(symbol: string) {
+    if (!storedCreds) throw new Error('Alpaca credentials not set');
+    const url = `${getBaseUrl(storedCreds.isPaper ?? true)}/positions/${symbol}`;
+    const res = await fetch(url, { method: 'DELETE', headers: buildHeaders(storedCreds) });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Alpaca closePosition failed: ${res.status} ${err}`);
     }
+  },
+};
 
-    try {
-      const body: any = {
-        symbol: symbol.replace('/', '').toUpperCase(),
-        qty: qty.toString(),
-        side,
-        type,
-        time_in_force: 'gtc',
-      };
-
-      if (type === 'limit' && limitPrice) {
-        body.limit_price = limitPrice.toString();
-      }
-
-      const res = await fetch(`${this.getBaseUrl()}/v2/orders`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        const err = await res.text();
-        return { success: false, message: `Alpaca Order Error: ${err}` };
-      }
-
-      const data = await res.json();
-      return {
-        success: true,
-        message: `Submitted Alpaca Paper Order ${data.id} (${side.toUpperCase()} ${qty} ${symbol} @ ${data.type})`,
-      };
-    } catch (e: any) {
-      return { success: false, message: e.message || 'Alpaca submission failed.' };
-    }
-  }
-
-  public async closePosition(symbol: string): Promise<boolean> {
-    if (!this.hasCredentials()) return false;
-
-    try {
-      const res = await fetch(`${this.getBaseUrl()}/v2/positions/${symbol.replace('/', '')}`, {
-        method: 'DELETE',
-        headers: this.getHeaders(),
-      });
-
-      return res.ok;
-    } catch {
-      return false;
-    }
-  }
-}
-
-export const alpacaBrokerClient = new AlpacaBrokerClient();
+export default alpacaBrokerClient;
