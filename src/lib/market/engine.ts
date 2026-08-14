@@ -1,21 +1,13 @@
 import {
-  SymbolId,
-  MarketSnapshot,
-  Candle,
-  OrderBook,
-  OrderBookLevel,
-  TradeTick,
-  AppMode,
-  DataQuality,
-  DataStatus,
+  SymbolId, MarketSnapshot, Candle, TradeTick, OrderBook,
+  OrderBookLevel, AppMode
 } from '@/types/trading';
 import { dataQualityEngine } from './DataQualityEngine';
 
-// Last known good prices — used as STALE fallback
 const SEED_PRICES: Record<SymbolId, number> = {
   BTCUSDT: 64250.0,
   ETHUSDT: 3450.0,
-  SOLUSDT: 148.5,
+  SOLUSDT: 145.0,
   XRPUSDT: 0.585,
 };
 
@@ -28,50 +20,111 @@ interface LiveTickerData {
   low24h: number;
   volume24h: number;
   fetchedAt: number;
-  source: 'binance' | 'alpaca' | 'simulated';
+  source: 'binance' | 'binance-us' | 'coinbase' | 'kraken' | 'alpaca' | 'simulated';
 }
 
 interface LiveOrderBook {
   bids: OrderBookLevel[];
   asks: OrderBookLevel[];
   fetchedAt: number;
-  source: 'binance' | 'alpaca' | 'simulated';
+  source: string;
 }
 
 interface LiveTradesData {
   trades: TradeTick[];
   fetchedAt: number;
-  source: 'binance' | 'alpaca' | 'simulated';
+  source: string;
 }
 
 interface LiveCandlesData {
   candles: Candle[];
   fetchedAt: number;
-  source: 'binance' | 'alpaca' | 'simulated';
+  source: string;
 }
 
 export class MarketEngine {
-  private lastTicker: Record<SymbolId, LiveTickerData | null> = {
-    BTCUSDT: null, ETHUSDT: null, SOLUSDT: null, XRPUSDT: null,
-  };
-  private lastOrderBook: Record<SymbolId, LiveOrderBook | null> = {
-    BTCUSDT: null, ETHUSDT: null, SOLUSDT: null, XRPUSDT: null,
-  };
-  private lastTrades: Record<SymbolId, LiveTradesData | null> = {
-    BTCUSDT: null, ETHUSDT: null, SOLUSDT: null, XRPUSDT: null,
-  };
-  private lastCandles: Record<SymbolId, LiveCandlesData | null> = {
-    BTCUSDT: null, ETHUSDT: null, SOLUSDT: null, XRPUSDT: null,
-  };
   private appMode: AppMode = 'PAPER';
   private alpacaCredentials: { key: string; secret: string } | null = null;
 
-  setMode(mode: AppMode) { this.appMode = mode; }
+  // Cached state per symbol
+  private lastTicker: Partial<Record<SymbolId, LiveTickerData>> = {};
+  private lastOrderBook: Partial<Record<SymbolId, LiveOrderBook>> = {};
+  private lastTrades: Partial<Record<SymbolId, LiveTradesData>> = {};
+  private lastCandles: Partial<Record<SymbolId, LiveCandlesData>> = {};
+
+  setMode(mode: AppMode) {
+    this.appMode = mode;
+  }
+
+  getMode(): AppMode {
+    return this.appMode;
+  }
+
   setAlpacaCredentials(key: string, secret: string) {
     this.alpacaCredentials = { key, secret };
   }
 
-  // ── Binance REST ticker ──────────────────────────────────────────────────
+  // ── Server Proxy Fetcher (/api/market) ───────────────────────────────────
+  private async fetchMarketApiProxy(symbol: SymbolId): Promise<{
+    ticker: LiveTickerData | null;
+    orderBook: LiveOrderBook | null;
+    candles: LiveCandlesData | null;
+  } | null> {
+    if (typeof window === 'undefined') return null;
+    try {
+      const res = await fetch(`/api/market?symbol=${symbol}`, { cache: 'no-store' });
+      if (!res.ok) return null;
+      const d = await res.json();
+      if (!d.success) return null;
+
+      let ticker: LiveTickerData | null = null;
+      if (d.ticker) {
+        ticker = {
+          price: d.ticker.price,
+          bid: d.ticker.bid,
+          ask: d.ticker.ask,
+          change24h: d.ticker.change24h,
+          high24h: d.ticker.high24h,
+          low24h: d.ticker.low24h,
+          volume24h: d.ticker.volume24h,
+          fetchedAt: d.ticker.fetchedAt || Date.now(),
+          source: d.ticker.source || 'binance',
+        };
+      }
+
+      let orderBook: LiveOrderBook | null = null;
+      if (d.orderBook) {
+        const mapLevels = (arr: { price: number; size: number }[]): OrderBookLevel[] => {
+          let total = 0;
+          return arr.map(item => {
+            total += item.size;
+            return { price: item.price, size: item.size, total };
+          });
+        };
+        orderBook = {
+          bids: mapLevels(d.orderBook.bids || []),
+          asks: mapLevels(d.orderBook.asks || []),
+          fetchedAt: d.orderBook.fetchedAt || Date.now(),
+          source: d.orderBook.source || 'binance',
+        };
+      }
+
+      let candles: LiveCandlesData | null = null;
+      if (d.candles && d.candles.candles) {
+        candles = {
+          candles: d.candles.candles,
+          fetchedAt: d.candles.fetchedAt || Date.now(),
+          source: d.candles.source || 'binance',
+        };
+      }
+
+      return { ticker, orderBook, candles };
+    } catch {
+      return null;
+    }
+  }
+
+  // ── Binance Direct REST Fallback ─────────────────────────────────────────
   private async fetchBinanceTicker(symbol: SymbolId): Promise<LiveTickerData | null> {
     try {
       const [tickerRes, bookRes] = await Promise.allSettled([
@@ -117,11 +170,10 @@ export class MarketEngine {
     }
   }
 
-  // ── Alpaca REST fallback ─────────────────────────────────────────────────
+  // ── Alpaca REST Fallback ─────────────────────────────────────────────────
   private async fetchAlpacaTicker(symbol: SymbolId): Promise<LiveTickerData | null> {
     if (!this.alpacaCredentials) return null;
     try {
-      // Map crypto symbols to Alpaca format
       const alpacaSymbol = symbol.replace('USDT', '/USD');
       const url = `https://data.alpaca.markets/v1beta3/crypto/us/latest/trades?symbols=${alpacaSymbol}`;
       const res = await fetch(url, {
@@ -154,89 +206,12 @@ export class MarketEngine {
     }
   }
 
-  // ── Binance REST order book ──────────────────────────────────────────────
-  private async fetchBinanceOrderBook(symbol: SymbolId): Promise<LiveOrderBook | null> {
-    try {
-      const res = await fetch(
-        `https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=20`,
-        { cache: 'no-store' }
-      );
-      if (!res.ok) return null;
-      const data = await res.json();
-      const mapLevels = (arr: [string, string][]): OrderBookLevel[] => {
-        let total = 0;
-        return arr.map(([p, s]) => {
-          const size = parseFloat(s);
-          total += size;
-          return { price: parseFloat(p), size, total };
-        });
-      };
-      return {
-        bids: mapLevels(data.bids || []),
-        asks: mapLevels(data.asks || []),
-        fetchedAt: Date.now(),
-        source: 'binance',
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  // ── Binance REST trades ──────────────────────────────────────────────────
-  private async fetchBinanceTrades(symbol: SymbolId, lastPrice: number): Promise<LiveTradesData | null> {
-    try {
-      const res = await fetch(
-        `https://api.binance.com/api/v3/trades?symbol=${symbol}&limit=50`,
-        { cache: 'no-store' }
-      );
-      if (!res.ok) return null;
-      const data = await res.json();
-      const trades: TradeTick[] = data.map((t: any) => {
-        const price = parseFloat(t.price);
-        const bid = lastPrice * 0.9999;
-        const ask = lastPrice * 1.0001;
-        return {
-          id: String(t.id),
-          time: t.time,
-          price,
-          size: parseFloat(t.qty),
-          side: (price >= ask ? 'BUY' : price <= bid ? 'SELL' : 'UNKNOWN') as TradeTick['side'],
-        };
-      });
-      return { trades: trades.reverse(), fetchedAt: Date.now(), source: 'binance' };
-    } catch {
-      return null;
-    }
-  }
-
-  // ── Binance REST candles ─────────────────────────────────────────────────
-  private async fetchBinanceCandles(symbol: SymbolId): Promise<LiveCandlesData | null> {
-    try {
-      const res = await fetch(
-        `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1m&limit=100`,
-        { cache: 'no-store' }
-      );
-      if (!res.ok) return null;
-      const data = await res.json();
-      const candles: Candle[] = data.map((k: any) => ({
-        time: k[0],
-        open: parseFloat(k[1]),
-        high: parseFloat(k[2]),
-        low: parseFloat(k[3]),
-        close: parseFloat(k[4]),
-        volume: parseFloat(k[5]),
-      }));
-      return { candles, fetchedAt: Date.now(), source: 'binance' };
-    } catch {
-      return null;
-    }
-  }
-
-  // ── Simulated order book from last price ────────────────────────────────
+  // ── Simulated Generators ──────────────────────────────────────────────────
   private buildSimulatedOrderBook(price: number): LiveOrderBook {
     const bids: OrderBookLevel[] = [];
     const asks: OrderBookLevel[] = [];
-    let bidTotal = 0, askTotal = 0;
+    let bidTotal = 0;
+    let askTotal = 0;
     for (let i = 1; i <= 15; i++) {
       const bidP = Number((price - i * price * 0.0001).toFixed(price > 100 ? 2 : 4));
       const askP = Number((price + i * price * 0.0001).toFixed(price > 100 ? 2 : 4));
@@ -267,42 +242,42 @@ export class MarketEngine {
 
   // ── Main tick ────────────────────────────────────────────────────────────
   public async tick(symbol: SymbolId): Promise<MarketSnapshot> {
-    // 1. Fetch ticker — Binance first, Alpaca fallback
-    let ticker = await this.fetchBinanceTicker(symbol);
-    if (!ticker) {
-      ticker = await this.fetchAlpacaTicker(symbol);
+    const now = Date.now();
+
+    // 1. Try Server Proxy first (multi-exchange: Binance, Binance US, Coinbase, Kraken)
+    const proxyData = await this.fetchMarketApiProxy(symbol);
+
+    let activeTicker: LiveTickerData | null = null;
+    let activeOB: LiveOrderBook | null = null;
+    let activeCandles: LiveCandlesData | null = null;
+
+    if (proxyData && proxyData.ticker) {
+      this.lastTicker[symbol] = proxyData.ticker;
+      activeTicker = proxyData.ticker;
+      if (proxyData.orderBook) this.lastOrderBook[symbol] = proxyData.orderBook;
+      if (proxyData.candles) this.lastCandles[symbol] = proxyData.candles;
     }
 
-    if (ticker) {
-      this.lastTicker[symbol] = ticker;
+    // 2. Direct fallbacks if proxy not available
+    if (!activeTicker) {
+      let ticker = await this.fetchBinanceTicker(symbol);
+      if (!ticker) ticker = await this.fetchAlpacaTicker(symbol);
+      if (ticker) {
+        this.lastTicker[symbol] = ticker;
+      }
+      activeTicker = this.lastTicker[symbol] ?? null;
     }
 
-    const activeTicker = this.lastTicker[symbol];
-    const price = activeTicker?.price ?? SEED_PRICES[symbol];
-    const tickerSource = activeTicker?.source ?? 'simulated';
+    const price = activeTicker?.price ?? (this.appMode === 'DEMO' ? SEED_PRICES[symbol] : (this.lastTicker[symbol]?.price ?? SEED_PRICES[symbol]));
+    const tickerSource = activeTicker?.source ?? (this.appMode === 'DEMO' ? 'simulated' : 'none');
 
-    // 2. Fetch order book
-    let ob = await this.fetchBinanceOrderBook(symbol);
-    if (ob) {
-      this.lastOrderBook[symbol] = ob;
-    }
-    const activeOB = this.lastOrderBook[symbol] ?? this.buildSimulatedOrderBook(price);
+    // 3. Order Book
+    activeOB = this.lastOrderBook[symbol] ?? this.buildSimulatedOrderBook(price);
 
-    // 3. Fetch trades
-    let trades = await this.fetchBinanceTrades(symbol, price);
-    if (trades) {
-      this.lastTrades[symbol] = trades;
-    }
-    const activeTrades = this.lastTrades[symbol];
+    // 4. Candles
+    activeCandles = this.lastCandles[symbol] ?? this.buildSimulatedCandles(price);
 
-    // 4. Fetch candles
-    let candles = await this.fetchBinanceCandles(symbol);
-    if (candles) {
-      this.lastCandles[symbol] = candles;
-    }
-    const activeCandles = this.lastCandles[symbol] ?? this.buildSimulatedCandles(price);
-
-    // 5. Build order book summary
+    // 5. Order book summary
     const bids = activeOB.bids;
     const asks = activeOB.asks;
     const bidDepth = bids.reduce((s, b) => s + b.size, 0);
@@ -320,19 +295,23 @@ export class MarketEngine {
       bids, asks, spread, spreadPercent, bidAskImbalance, bidDepth, askDepth, midPrice,
     };
 
-    // 6. Data quality
-    const now = Date.now();
+    // 6. Data quality evaluation
+    const tickerAge = activeTicker ? now - activeTicker.fetchedAt : null;
+    const orderBookAge = activeOB.source !== 'simulated' ? now - activeOB.fetchedAt : null;
+    const candlesAge = activeCandles.source !== 'simulated' ? now - activeCandles.fetchedAt : null;
+
     const dataQuality = dataQualityEngine.buildQuality({
-      tickerAge: activeTicker ? now - activeTicker.fetchedAt : null,
-      orderBookAge: activeOB.source !== 'simulated' ? now - activeOB.fetchedAt : null,
-      tradesAge: activeTrades ? now - activeTrades.fetchedAt : null,
-      candlesAge: activeCandles.source !== 'simulated' ? now - activeCandles.fetchedAt : null,
+      tickerAge,
+      orderBookAge,
+      tradesAge: tickerAge,
+      candlesAge,
       source: tickerSource as any,
+      appMode: this.appMode,
     });
 
     return {
       symbol,
-      exchange: tickerSource === 'alpaca' ? 'Alpaca' : tickerSource === 'binance' ? 'Binance' : 'Demo',
+      exchange: tickerSource === 'alpaca' ? 'Alpaca' : tickerSource === 'coinbase' ? 'Coinbase' : tickerSource === 'kraken' ? 'Kraken' : tickerSource === 'binance-us' ? 'Binance US' : tickerSource === 'binance' ? 'Binance' : 'Demo',
       timestamp: now,
       price,
       bid: activeTicker?.bid ?? bestBid,
@@ -343,7 +322,7 @@ export class MarketEngine {
       low24h: activeTicker?.low24h ?? price * 0.98,
       volume24h: activeTicker?.volume24h ?? 0,
       candles: activeCandles.candles,
-      recentTrades: activeTrades?.trades ?? [],
+      recentTrades: this.lastTrades[symbol]?.trades ?? [],
       orderBook,
       fundingRate: null,
       openInterest: null,

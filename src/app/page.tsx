@@ -331,7 +331,7 @@ export default function Home() {
         </div>
 
         {/* CRITICAL STALE BANNER */}
-        {isCritical && (
+        {isCritical && appMode !== 'DEMO' && (
           <div className="bg-rose-600/20 border-t border-rose-500/30 px-4 py-2 flex items-center gap-2 text-xs text-rose-300 font-semibold">
             <AlertTriangle className="w-4 h-4" />
             ⚠ TRADING DISABLED — Market data is stale. AI will return NO_TRADE until live data is restored.

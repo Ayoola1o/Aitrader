@@ -1,6 +1,6 @@
 import { DataQuality, DataStatus, AppMode } from '@/types/trading';
 
-const STALE_THRESHOLD_MS = 8000; // 8 seconds
+const STALE_THRESHOLD_MS = 25000; // 25 seconds tolerance for network jitter
 
 export class DataQualityEngine {
   checkFreshness(lastUpdated: number): DataStatus {
@@ -14,13 +14,15 @@ export class DataQualityEngine {
     orderBookAge: number | null;
     tradesAge: number | null;
     candlesAge: number | null;
-    source: 'binance' | 'alpaca' | 'simulated' | 'none';
+    source: 'binance' | 'binance-us' | 'coinbase' | 'kraken' | 'alpaca' | 'simulated' | 'none';
+    appMode?: AppMode;
   }): DataQuality {
     const toStatus = (age: number | null): DataStatus => {
       if (age === null) return 'UNAVAILABLE';
       if (fields.source === 'simulated') return 'SIMULATED';
       if (fields.source === 'none') return 'UNAVAILABLE';
-      return this.checkFreshness(Date.now() - age);
+      if (age <= STALE_THRESHOLD_MS) return 'LIVE';
+      return 'STALE';
     };
 
     const tickerStatus = toStatus(fields.tickerAge);
@@ -28,13 +30,15 @@ export class DataQualityEngine {
     const tradesStatus = toStatus(fields.tradesAge);
     const candlesStatus = toStatus(fields.candlesAge);
 
+    // In DEMO mode, simulated data is valid and never criticalStale
     const isCriticalStale =
-      tickerStatus === 'STALE' ||
-      tickerStatus === 'UNAVAILABLE';
+      fields.appMode === 'DEMO'
+        ? false
+        : (tickerStatus === 'STALE' || tickerStatus === 'UNAVAILABLE');
 
-    // Score: each live field = 20 pts, simulated = 5 pts
+    // Score: live = 25 pts, delayed = 15 pts, simulated = 10 pts
     const score = (s: DataStatus) =>
-      s === 'LIVE' ? 25 : s === 'DELAYED' ? 15 : s === 'SIMULATED' ? 5 : 0;
+      s === 'LIVE' ? 25 : s === 'DELAYED' ? 15 : s === 'SIMULATED' ? 10 : 0;
 
     const overallScore = Math.min(
       100,
@@ -52,7 +56,7 @@ export class DataQualityEngine {
       fundingStatus: 'UNAVAILABLE',
       openInterestStatus: 'UNAVAILABLE',
       macroStatus: 'UNAVAILABLE',
-      overallScore,
+      overallScore: fields.appMode === 'DEMO' ? 95 : overallScore,
       criticalStale: isCriticalStale,
       lastUpdated: Date.now(),
     };
