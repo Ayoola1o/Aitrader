@@ -1,167 +1,130 @@
-import React, { useState, useEffect } from 'react';
-import { BotEngine, BotConfig, BotStatus } from '@/lib/features/engine';
-import { fetchOpenAlpacaOrders } from '@/lib/broker/alpaca';
-import { AlertTriangle, PlusCircle } from 'lucide-react';
+'use client';
 
-/**
- * Bot Manager – UI driven by the screenshot provided by the user.
- * Shows a table of bots, allows creation, editing of risk‑gate thresholds
- * and per‑bot Alpaca credentials. All fields are free‑form (no defaults).
- */
+import React, { useState } from 'react';
+import { BotConfig, BotStatus, tradingBotEngine } from '@/lib/bot/engine';
+import { SymbolId } from '@/types/trading';
+import { AlertTriangle, PlusCircle, Bot, Play, Square } from 'lucide-react';
+
 export const BotManager: React.FC = () => {
-  const [bots, setBots] = useState<BotConfig[]>([]);
+  const [botState, setBotState] = useState(tradingBotEngine.getState());
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newBot, setNewBot] = useState<Partial<BotConfig>>({});
+  const [symbol, setSymbol] = useState<SymbolId>('BTCUSDT');
+  const [allocatedCapital, setAllocatedCapital] = useState<number>(500);
 
-  // Load persisted bots on mount
-  useEffect(() => {
-    const loadBots = async () => {
-      const stored = await BotEngine.listBots();
-      setBots(stored);
-    };
-    loadBots();
-  }, []);
-
-  const handleAddBot = async () => {
-    if (!newBot.name || !newBot.symbol) return;
-    const created = await BotEngine.createBot(newBot as BotConfig);
-    setBots(prev => [...prev, created]);
+  const handleStartBot = (e: React.FormEvent) => {
+    e.preventDefault();
+    tradingBotEngine.start({
+      symbol,
+      allocatedCapital,
+      cycleIntervalSeconds: 30,
+      maxConsecutiveNoTrades: 5,
+      maxConsecutiveLosses: 3,
+      autoConfirmExit: false,
+    });
+    setBotState(tradingBotEngine.getState());
     setShowAddModal(false);
-    setNewBot({});
   };
 
-  const toggleBot = async (id: string, enable: boolean) => {
-    if (enable) await BotEngine.startBot(id);
-    else await BotEngine.stopBot(id);
-    // refresh status
-    const refreshed = await BotEngine.getBot(id);
-    setBots(prev => prev.map(b => (b.id === id ? refreshed : b)));
-  };
-
-  const deleteBot = async (id: string) => {
-    await BotEngine.removeBot(id);
-    setBots(prev => prev.filter(b => b.id !== id));
+  const handleStopBot = () => {
+    tradingBotEngine.stop();
+    setBotState(tradingBotEngine.getState());
   };
 
   return (
-    <div className="p-4 space-y-4">
-      {/* Header */}
+    <div className="p-4 rounded-2xl bg-[#0B111E] border border-gray-800 space-y-4 text-white">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-gray-200">Bot Manager</h2>
+        <div className="flex items-center gap-2">
+          <Bot className="w-5 h-5 text-emerald-400" />
+          <h3 className="font-bold text-sm">Quantitative AI Bot Controller</h3>
+        </div>
         <button
-          className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-500"
           onClick={() => setShowAddModal(true)}
+          className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-bold flex items-center gap-1.5 transition-all"
         >
-          <PlusCircle className="w-4 h-4" /> Add Bot
+          <PlusCircle className="w-4 h-4" />
+          Configure Bot
         </button>
       </div>
 
-      {/* Bot Table */}
-      <table className="min-w-full text-sm text-gray-300">
-        <thead className="bg-gray-800">
-          <tr>
-            <th className="px-3 py-2">Name</th>
-            <th className="px-3 py-2">Symbol</th>
-            <th className="px-3 py-2">Mode</th>
-            <th className="px-3 py-2">Capital</th>
-            <th className="px-3 py-2">Risk Gate</th>
-            <th className="px-3 py-2">Status</th>
-            <th className="px-3 py-2">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {bots.map(bot => (
-            <tr key={bot.id} className="border-b border-gray-700">
-              <td className="px-3 py-2">{bot.name}</td>
-              <td className="px-3 py-2">{bot.symbol}</td>
-              <td className="px-3 py-2">{bot.appMode}</td>
-              <td className="px-3 py-2">${bot.allocatedCapital.toLocaleString()}</td>
-              <td className="px-3 py-2">
-                {/* risk‑gate inputs – free numbers */}
-                <input
-                  type="number"
-                  className="w-16 bg-gray-800 border border-gray-600 rounded px-1 text-xs text-gray-200"
-                  value={bot.riskGate ?? ''}
-                  onChange={e => BotEngine.updateBot(bot.id, { riskGate: Number(e.target.value) })}
-                />
-              </td>
-              <td className="px-3 py-2">
-                {bot.isRunning ? (
-                  <span className="px-2 py-0.5 bg-emerald-600/30 text-emerald-400 rounded">Running</span>
-                ) : (
-                  <span className="px-2 py-0.5 bg-gray-600/30 text-gray-300 rounded">Paused</span>
-                )}
-              </td>
-              <td className="px-3 py-2 space-x-2">
-                <button
-                  className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-500"
-                  onClick={() => toggleBot(bot.id, !bot.isRunning)}
-                >
-                  {bot.isRunning ? 'Stop' : 'Start'}
-                </button>
-                <button
-                  className="px-2 py-1 text-xs bg-rose-600 text-white rounded hover:bg-rose-500"
-                  onClick={() => deleteBot(bot.id)}
-                >
-                  Delete
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="p-3 bg-[#080E1A] rounded-xl border border-gray-800 text-xs space-y-2">
+        <div className="flex justify-between">
+          <span className="text-gray-400">Status:</span>
+          <span className="font-bold text-emerald-400">{botState.status}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-gray-400">Symbol:</span>
+          <span className="font-bold text-white">{botState.symbol}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-gray-400">Allocated Capital:</span>
+          <span className="font-bold text-white">${botState.allocatedCapital}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-gray-400">Cycles:</span>
+          <span className="font-bold text-white">#{botState.cycleCount}</span>
+        </div>
+      </div>
 
-      {/* Add Bot Modal */}
+      {botState.status === 'RUNNING' ? (
+        <button
+          onClick={handleStopBot}
+          className="w-full py-2 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-400 text-xs font-bold flex items-center justify-center gap-1.5"
+        >
+          <Square className="w-3.5 h-3.5 fill-current" />
+          Stop Bot
+        </button>
+      ) : (
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="w-full py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold flex items-center justify-center gap-1.5"
+        >
+          <Play className="w-3.5 h-3.5 fill-current" />
+          Start Bot
+        </button>
+      )}
+
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center">
-          <div className="bg-gray-900 p-6 rounded-lg w-96 space-y-4">
-            <h3 className="text-lg font-semibold text-gray-200">Create New Bot</h3>
-            <input
-              placeholder="Bot name"
-              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200"
-              value={newBot.name || ''}
-              onChange={e => setNewBot({ ...newBot, name: e.target.value })}
-            />
-            <input
-              placeholder="Symbol (e.g., BTCUSDT)"
-              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200"
-              value={newBot.symbol || ''}
-              onChange={e => setNewBot({ ...newBot, symbol: e.target.value as any })}
-            />
-            <input
-              placeholder="Allocated capital"
-              type="number"
-              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200"
-              value={newBot.allocatedCapital ?? ''}
-              onChange={e => setNewBot({ ...newBot, allocatedCapital: Number(e.target.value) })}
-            />
-            {/* Mode selection – no default, user must pick */}
-            <div className="flex gap-2">
-              {(['DEMO', 'PAPER'] as const).map(m => (
-                <button
-                  key={m}
-                  className={`flex-1 px-2 py-1 rounded ${newBot.appMode === m ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300'}`}
-                  onClick={() => setNewBot({ ...newBot, appMode: m })}
-                >
-                  {m}
-                </button>
-              ))}
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <form onSubmit={handleStartBot} className="bg-[#0B111E] p-5 rounded-2xl border border-gray-800 max-w-sm w-full space-y-4 text-xs">
+            <h4 className="font-bold text-sm">Spawn AI Bot</h4>
+            <div>
+              <label className="text-gray-400 block mb-1">Symbol</label>
+              <select
+                value={symbol}
+                onChange={(e) => setSymbol(e.target.value as SymbolId)}
+                className="w-full bg-[#080E1A] border border-gray-800 rounded-lg p-2 text-white"
+              >
+                <option value="BTCUSDT">BTCUSDT</option>
+                <option value="ETHUSDT">ETHUSDT</option>
+                <option value="SOLUSDT">SOLUSDT</option>
+                <option value="XRPUSDT">XRPUSDT</option>
+              </select>
             </div>
-            <div className="flex justify-end space-x-2 pt-2">
+            <div>
+              <label className="text-gray-400 block mb-1">Capital ($)</label>
+              <input
+                type="number"
+                value={allocatedCapital}
+                onChange={(e) => setAllocatedCapital(Number(e.target.value))}
+                className="w-full bg-[#080E1A] border border-gray-800 rounded-lg p-2 text-white"
+              />
+            </div>
+            <div className="flex gap-2">
               <button
-                className="px-3 py-1 bg-gray-600 text-gray-200 rounded hover:bg-gray-500"
+                type="button"
                 onClick={() => setShowAddModal(false)}
+                className="w-1/2 py-2 rounded-lg bg-gray-800 text-gray-300"
               >
                 Cancel
               </button>
               <button
-                className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-500"
-                onClick={handleAddBot}
+                type="submit"
+                className="w-1/2 py-2 rounded-lg bg-emerald-500 text-white font-bold"
               >
-                Create
+                Launch
               </button>
             </div>
-          </div>
+          </form>
         </div>
       )}
     </div>
