@@ -323,7 +323,7 @@ export default function Home() {
               <div className="text-gray-300">
                 <span className="text-gray-400">Equity:</span>{' '}
                 <strong className={portfolio.totalPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                  ${portfolio.equity.toLocaleString()}
+                  ${(portfolio.equity ?? 0).toLocaleString()}
                 </strong>
               </div>
             )}

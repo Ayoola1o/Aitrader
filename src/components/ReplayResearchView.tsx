@@ -110,7 +110,7 @@ export const ReplayResearchView: React.FC<ReplayResearchViewProps> = ({
                       <td className="py-2 font-mono text-gray-400 text-[10px]">{d.decisionId}</td>
                       <td className="py-2 text-gray-500">{new Date(d.timestamp).toLocaleTimeString()}</td>
                       <td className="py-2 text-right font-bold text-white">{d.symbol}</td>
-                      <td className="py-2 text-right text-gray-300">${d.price.toLocaleString()}</td>
+                      <td className="py-2 text-right text-gray-300">${(d?.price ?? 0).toLocaleString()}</td>
                       <td className={`py-2 text-right font-bold ${
                         d.action === 'BUY' ? 'text-emerald-400' :
                         d.action === 'SELL' ? 'text-rose-400' : 'text-gray-400'

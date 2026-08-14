@@ -1,11 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
-
-// Global Supabase client (already used elsewhere)
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
 /**
  * Alpaca REST wrapper – supports global credentials from .env
  * as well as per‑bot credential overrides.

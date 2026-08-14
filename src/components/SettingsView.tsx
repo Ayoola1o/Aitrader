@@ -151,7 +151,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCred
 
       try {
         const acc = await alpacaBrokerClient.getAccount();
-        setAlpacaStatus(`Connected & Saved! Equity: $${acc.equity.toLocaleString()}`);
+        setAlpacaStatus(`Connected & Saved! Equity: $${(Number(acc?.equity) || 0).toLocaleString()}`);
         setUseAlpacaBroker(true);
       } catch (e: any) {
         setAlpacaStatus(`Saved to browser, Alpaca status: ${e.message}`);

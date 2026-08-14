@@ -69,13 +69,13 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
 
       {/* Balance Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MetricCard label="Account Equity" value={`$${portfolio.equity.toLocaleString()}`} color="white" />
-        <MetricCard label="Cash Balance" value={`$${portfolio.balance.toLocaleString()}`} color="gray-200" />
-        <MetricCard label="Buying Power" value={`$${portfolio.freeMargin.toLocaleString()}`} color="emerald-400" />
+        <MetricCard label="Account Equity" value={`$${(portfolio?.equity ?? 0).toLocaleString()}`} color="white" />
+        <MetricCard label="Cash Balance" value={`$${(portfolio?.balance ?? 0).toLocaleString()}`} color="gray-200" />
+        <MetricCard label="Buying Power" value={`$${(portfolio?.freeMargin ?? 0).toLocaleString()}`} color="emerald-400" />
         <MetricCard
           label="Unrealized P&L"
-          value={`${portfolio.unrealizedPnL >= 0 ? '+' : ''}$${portfolio.unrealizedPnL?.toFixed(2) ?? '0.00'}`}
-          color={portfolio.unrealizedPnL >= 0 ? 'emerald-400' : 'rose-400'}
+          value={`${(portfolio?.unrealizedPnL ?? 0) >= 0 ? '+' : ''}$${portfolio?.unrealizedPnL?.toFixed(2) ?? '0.00'}`}
+          color={(portfolio?.unrealizedPnL ?? 0) >= 0 ? 'emerald-400' : 'rose-400'}
         />
       </div>
 

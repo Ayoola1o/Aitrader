@@ -1,5 +1,3 @@
-
-
 'use client';
 
 import React, { useState } from 'react';
@@ -173,16 +171,16 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
               <div className="flex items-center gap-1.5">
                 <Wallet className="w-3.5 h-3.5 text-emerald-400" />
                 <span className="text-gray-400 font-medium">Buying Power:</span>
-                <strong className="text-white font-bold">${(portfolio.freeMargin || portfolio.equity).toLocaleString()}</strong>
+                <strong className="text-white font-bold">${((portfolio?.freeMargin ?? portfolio?.equity) ?? 0).toLocaleString()}</strong>
               </div>
               <div className="w-px h-3 bg-gray-800" />
               <div className="flex items-center gap-1.5">
                 <span className="text-gray-400">Equity:</span>
-                <strong className="text-emerald-400 font-bold">${portfolio.equity.toLocaleString()}</strong>
+                <strong className="text-emerald-400 font-bold">${(portfolio?.equity ?? 0).toLocaleString()}</strong>
               </div>
               <div className="w-px h-3 bg-gray-800" />
-              <div className={`font-bold ${portfolio.totalPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {portfolio.totalPnL >= 0 ? '+' : ''}${portfolio.totalPnL.toFixed(2)}
+              <div className={`font-bold ${(portfolio?.totalPnL ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {(portfolio?.totalPnL ?? 0) >= 0 ? '+' : ''}${(portfolio?.totalPnL ?? 0).toFixed(2)}
               </div>
             </div>
           ) : (
@@ -250,7 +248,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
               </div>
               <div className="p-2 bg-[#080E1A] rounded-xl border border-gray-800/80">
                 <span className="text-[10px] text-gray-500 block">Capital Assigned</span>
-                <strong className="text-emerald-400 font-bold">${botState.allocatedCapital.toLocaleString()}</strong>
+                <strong className="text-emerald-400 font-bold">${(botState?.allocatedCapital ?? 500).toLocaleString()}</strong>
               </div>
               <div className="p-2 bg-[#080E1A] rounded-xl border border-gray-800/80">
                 <span className="text-[10px] text-gray-500 block">Cycles / Trades</span>
@@ -1116,7 +1114,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                 <label className="text-gray-400 block mb-1 font-semibold flex items-center justify-between">
                   <span>Allocated Bot Capital ($ USD)</span>
                   <span className="text-[10px] text-emerald-400 font-normal">
-                    Buying Power: ${portfolio ? (portfolio.freeMargin || portfolio.equity).toLocaleString() : '10,000'}
+                    Buying Power: ${((portfolio?.freeMargin ?? portfolio?.equity) ?? 10000).toLocaleString()}
                   </span>
                 </label>
                 <div className="relative">
@@ -1232,7 +1230,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-400">Allocated Capital:</span>
-                <strong className="text-emerald-400 font-bold">${botState.allocatedCapital.toLocaleString()}</strong>
+                <strong className="text-emerald-400 font-bold">${(botState?.allocatedCapital ?? 500).toLocaleString()}</strong>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-400">Session P&L:</span>

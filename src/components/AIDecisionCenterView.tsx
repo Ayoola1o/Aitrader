@@ -130,10 +130,10 @@ export const AIDecisionCenterView: React.FC<AIDecisionCenterViewProps> = ({
           </div>
 
           <div className="grid grid-cols-2 gap-3 text-xs">
-            <div><span className="text-gray-400 block">Entry</span><strong className="text-white">{decision.entry ? `$${decision.entry.toLocaleString()}` : '—'}</strong></div>
+            <div><span className="text-gray-400 block">Entry</span><strong className="text-white">{decision.entry != null ? `$${decision.entry.toLocaleString()}` : '—'}</strong></div>
             <div><span className="text-gray-400 block">Horizon</span><strong className="text-white">{decision.timeHorizon}</strong></div>
-            <div><span className="text-gray-400 block">Stop Loss</span><strong className="text-rose-400">{decision.stopLoss ? `$${decision.stopLoss.toLocaleString()}` : '—'}</strong></div>
-            <div><span className="text-gray-400 block">Take Profit</span><strong className="text-emerald-400">{decision.takeProfit ? `$${decision.takeProfit.toLocaleString()}` : '—'}</strong></div>
+            <div><span className="text-gray-400 block">Stop Loss</span><strong className="text-rose-400">{decision.stopLoss != null ? `$${decision.stopLoss.toLocaleString()}` : '—'}</strong></div>
+            <div><span className="text-gray-400 block">Take Profit</span><strong className="text-emerald-400">{decision.takeProfit != null ? `$${decision.takeProfit.toLocaleString()}` : '—'}</strong></div>
             <div><span className="text-gray-400 block">Risk:Reward</span><strong className="text-white">{decision.riskReward ? `${decision.riskReward}:1` : '—'}</strong></div>
             <div><span className="text-gray-400 block">Regime</span><strong className="text-white">{decision.regime}</strong></div>
           </div>
@@ -258,7 +258,7 @@ export const AIDecisionCenterView: React.FC<AIDecisionCenterViewProps> = ({
                   : 'bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/30'
               }`}
             >
-              Execute {decision.action} — {riskCheck.calculatedPositionSize.toFixed(4)} units @ ${decision.entry?.toLocaleString()}
+              Execute {decision.action} — {riskCheck.calculatedPositionSize.toFixed(4)} units @ ${decision.entry != null ? decision.entry.toLocaleString() : 'market'}
             </button>
           )}
         </div>

@@ -83,17 +83,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <span className="text-[10px] text-gray-500">{snapshot?.exchange ? `(${snapshot.exchange})` : ''}</span>
             </div>
           </div>
-          <p className="text-3xl font-black text-white">${price.toLocaleString()}</p>
+          <p className="text-3xl font-black text-white">${(price ?? 0).toLocaleString()}</p>
           <p className={`text-sm font-bold mt-1 flex items-center gap-1 ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
             {change >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
             {change >= 0 ? '+' : ''}{change}% (24h)
           </p>
           {snapshot && (
             <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-400">
-              <div>H24: <strong className="text-white">${snapshot.high24h.toLocaleString()}</strong></div>
-              <div>L24: <strong className="text-white">${snapshot.low24h.toLocaleString()}</strong></div>
-              <div>Vol: <strong className="text-white">{snapshot.volume24h.toFixed(0)}</strong></div>
-              <div>Spread: <strong className="text-white">{(snapshot.orderBook.spreadPercent * 100).toFixed(4)}%</strong></div>
+              <div>H24: <strong className="text-white">${(snapshot?.high24h ?? 0).toLocaleString()}</strong></div>
+              <div>L24: <strong className="text-white">${(snapshot?.low24h ?? 0).toLocaleString()}</strong></div>
+              <div>Vol: <strong className="text-white">{(snapshot?.volume24h ?? 0).toFixed(0)}</strong></div>
+              <div>Spread: <strong className="text-white">{((snapshot?.orderBook?.spreadPercent ?? 0) * 100).toFixed(4)}%</strong></div>
             </div>
           )}
         </div>
@@ -144,15 +144,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="space-y-2 text-xs">
               <div className="flex justify-between">
                 <span className="text-gray-400">Equity</span>
-                <strong className="text-white text-base">${portfolio.equity.toLocaleString()}</strong>
+                <strong className="text-white text-base">${(portfolio?.equity ?? 0).toLocaleString()}</strong>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-400">Cash / Balance</span>
-                <span className="text-gray-200">${portfolio.balance.toLocaleString()}</span>
+                <span className="text-gray-200">${(portfolio?.balance ?? 0).toLocaleString()}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-400">Buying Power</span>
-                <span className="text-emerald-400 font-bold">${portfolio.freeMargin.toLocaleString()}</span>
+                <span className="text-emerald-400 font-bold">${(portfolio?.freeMargin ?? 0).toLocaleString()}</span>
               </div>
               <div className="flex justify-between border-t border-gray-800 pt-2 mt-2">
                 <span className="text-gray-400">Total P&L</span>
