@@ -139,36 +139,82 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCred
   const handleTestTelegram = async () => {
     setIsTestingTelegram(true);
     setTelegramStatus(null);
-    try {
-      telegramService.saveConfig({
-        botToken: telegramToken.trim(),
-        chatId: telegramChatId.trim(),
-        enabled: telegramEnabled,
-        notifyHeartbeat: telegramNotifyHeartbeat,
-        notifyTrades: telegramNotifyTrades,
-        notifyPositionClose: telegramNotifyPositionClose,
-        notifyRiskAlerts: telegramNotifyRiskAlerts,
-      });
 
+    let cleanToken = telegramToken.trim();
+    if (cleanToken.toLowerCase().startsWith('bot')) {
+      cleanToken = cleanToken.slice(3).trim();
+    }
+    const cleanChat = telegramChatId.trim();
+
+    if (!cleanToken || !cleanChat) {
+      setTelegramStatus({ success: false, message: 'Please enter both Telegram Bot Token and Chat ID.' });
+      setIsTestingTelegram(false);
+      return;
+    }
+
+    telegramService.saveConfig({
+      botToken: cleanToken,
+      chatId: cleanChat,
+      enabled: telegramEnabled,
+      notifyHeartbeat: telegramNotifyHeartbeat,
+      notifyTrades: telegramNotifyTrades,
+      notifyPositionClose: telegramNotifyPositionClose,
+      notifyRiskAlerts: telegramNotifyRiskAlerts,
+    });
+
+    try {
+      // 1. Try Next.js server route proxy first
       const res = await fetch('/api/notifications/telegram', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'TEST',
-          botToken: telegramToken.trim(),
-          chatId: telegramChatId.trim(),
+          botToken: cleanToken,
+          chatId: cleanChat,
         }),
       });
 
       const data = await res.json();
       if (data.success) {
         setTelegramStatus({ success: true, message: '✓ Test message delivered to your Telegram chat successfully!' });
+        setIsTestingTelegram(false);
+        return;
+      }
+
+      // If server returned specific Telegram API error (e.g. Chat not found, Unauthorized), display it
+      if (data.error && !data.error.includes('Network error')) {
+        setTelegramStatus({ success: false, message: `Telegram: ${data.error}` });
+        setIsTestingTelegram(false);
+        return;
+      }
+
+      // 2. Fallback: Direct browser fetch to Telegram Bot API
+      const directRes = await fetch(`https://api.telegram.org/bot${cleanToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: cleanChat,
+          text: `<b>🤖 [AI QUANT TRADER] TELEGRAM NOTIFICATIONS CONNECTED!</b>\n━━━━━━━━━━━━━━━━━━━━\n✓ <b>Status:</b> <code>ONLINE & VERIFIED</code>\n📡 <b>Transport:</b> <code>Direct Client API</code>\n⏰ <b>Time:</b> <code>${new Date().toUTCString()}</code>\n\n<i>You will now receive automated trade executions, position exits, 24/7 heartbeats, and risk alerts!</i>`,
+          parse_mode: 'HTML',
+        }),
+      });
+
+      const directData = await directRes.json();
+      if (directData.ok) {
+        setTelegramStatus({ success: true, message: '✓ Test message delivered to your Telegram chat successfully!' });
       } else {
-        setTelegramStatus({ success: false, message: `Telegram error: ${data.error || 'Check Bot Token & Chat ID'}` });
+        let helpTip = '';
+        if (directData.description?.includes('chat not found')) {
+          helpTip = ' (Did you send /start to your bot in Telegram first?)';
+        }
+        setTelegramStatus({ success: false, message: `Telegram error: ${directData.description || 'Request failed'}${helpTip}` });
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      setTelegramStatus({ success: false, message: `Failed to connect: ${message}` });
+      setTelegramStatus({
+        success: false,
+        message: `Connection failed: ${message}. Make sure you clicked START / sent /start to your bot in Telegram first!`,
+      });
     } finally {
       setIsTestingTelegram(false);
     }
