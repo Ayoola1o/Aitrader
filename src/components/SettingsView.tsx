@@ -591,6 +591,30 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCred
           </div>
         </div>
 
+        {/* Two-Way Commands Cheatsheet Box */}
+        <div className="p-3.5 bg-[#080E1A] rounded-xl border border-gray-800 text-xs space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-white flex items-center gap-1.5">
+              <MessageSquare className="w-3.5 h-3.5 text-cyan-400" />
+              Available Two-Way Telegram Commands:
+            </span>
+            <span className="text-[10px] text-cyan-400 font-mono">Send anytime to your bot</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono">
+            <div className="p-1.5 bg-[#0B111E] rounded border border-gray-800/80"><code className="text-cyan-400 font-bold">/status</code> <span className="text-gray-400 block text-[10px]">Equity & P&L</span></div>
+            <div className="p-1.5 bg-[#0B111E] rounded border border-gray-800/80"><code className="text-cyan-400 font-bold">/bots</code> <span className="text-gray-400 block text-[10px]">Active roster</span></div>
+            <div className="p-1.5 bg-[#0B111E] rounded border border-gray-800/80"><code className="text-cyan-400 font-bold">/positions</code> <span className="text-gray-400 block text-[10px]">Open trades</span></div>
+            <div className="p-1.5 bg-[#0B111E] rounded border border-gray-800/80"><code className="text-cyan-400 font-bold">/market btc</code> <span className="text-gray-400 block text-[10px]">Live quote & AI</span></div>
+            <div className="p-1.5 bg-[#0B111E] rounded border border-gray-800/80"><code className="text-cyan-400 font-bold">/startbot btc</code> <span className="text-gray-400 block text-[10px]">Start bot</span></div>
+            <div className="p-1.5 bg-[#0B111E] rounded border border-gray-800/80"><code className="text-cyan-400 font-bold">/stopbot btc</code> <span className="text-gray-400 block text-[10px]">Pause bot</span></div>
+            <div className="p-1.5 bg-[#0B111E] rounded border border-gray-800/80"><code className="text-cyan-400 font-bold">/report</code> <span className="text-gray-400 block text-[10px]">Daily metrics</span></div>
+            <div className="p-1.5 bg-[#0B111E] rounded border border-gray-800/80"><code className="text-rose-400 font-bold">/closeall</code> <span className="text-gray-400 block text-[10px]">🚨 Panic close</span></div>
+          </div>
+          <p className="text-[10px] text-gray-500 pt-1">
+            📖 Full setup guide available in <code className="text-cyan-400 font-mono">docs/TELEGRAM_SETUP_GUIDE.md</code>.
+          </p>
+        </div>
+
         {/* Test Connection Button & Status */}
         <div className="pt-2 flex flex-wrap items-center gap-3">
           <button
