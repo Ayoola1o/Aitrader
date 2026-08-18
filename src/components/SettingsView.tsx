@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Settings, Shield, Cpu, Check, Download, Wifi, Key, Database, DollarSign, RefreshCw, CheckCircle, XCircle } from 'lucide-react';
+import { Settings, Shield, Cpu, Check, Download, Wifi, Key, Database, DollarSign, RefreshCw, CheckCircle, XCircle, Bell, Send, MessageSquare } from 'lucide-react';
 import { aiProviderManager, AIProviderId } from '@/lib/llm/providers';
 import { dbPersistence } from '@/lib/db/schema';
 import { paperBroker } from '@/lib/broker/paper';
 import { alpacaBrokerClient } from '@/lib/broker/alpaca';
 import { AppMode } from '@/types/trading';
 import { supabaseManager } from '@/lib/db/supabase';
+import { telegramService, TelegramConfig } from '@/lib/notifications/telegram';
 import { applySettings, loadSettings, saveSettings, DEFAULT_SETTINGS } from '@/lib/settings';
 
 interface SettingsViewProps {
@@ -23,6 +24,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCred
   const [killSwitch, setKillSwitch] = useState<boolean>(DEFAULT_SETTINGS.killSwitch);
   const [confidenceThreshold, setConfidenceThreshold] = useState<number>(DEFAULT_SETTINGS.confidenceThreshold);
   const [startingBalance, setStartingBalance] = useState<number>(DEFAULT_SETTINGS.startingBalance);
+
+  // Telegram Notifications State
+  const [telegramToken, setTelegramToken] = useState<string>('');
+  const [telegramChatId, setTelegramChatId] = useState<string>('');
+  const [telegramEnabled, setTelegramEnabled] = useState<boolean>(true);
+  const [telegramNotifyHeartbeat, setTelegramNotifyHeartbeat] = useState<boolean>(true);
+  const [telegramNotifyTrades, setTelegramNotifyTrades] = useState<boolean>(true);
+  const [telegramNotifyPositionClose, setTelegramNotifyPositionClose] = useState<boolean>(true);
+  const [telegramNotifyRiskAlerts, setTelegramNotifyRiskAlerts] = useState<boolean>(true);
+  const [isTestingTelegram, setIsTestingTelegram] = useState<boolean>(false);
+  const [telegramStatus, setTelegramStatus] = useState<{ success?: boolean; message: string } | null>(null);
 
   // Alpaca API Credentials
   const [alpacaApiKey, setAlpacaApiKey] = useState<string>(() => {
@@ -91,6 +103,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCred
     setStartingBalance(saved.startingBalance);
     applySettings(saved);
 
+    // Load Telegram Config
+    const tg = telegramService.loadConfig();
+    setTelegramToken(tg.botToken);
+    setTelegramChatId(tg.chatId);
+    setTelegramEnabled(tg.enabled);
+    setTelegramNotifyHeartbeat(tg.notifyHeartbeat);
+    setTelegramNotifyTrades(tg.notifyTrades);
+    setTelegramNotifyPositionClose(tg.notifyPositionClose);
+    setTelegramNotifyRiskAlerts(tg.notifyRiskAlerts);
+
     if (alpacaApiKey && alpacaSecretKey) {
       alpacaBrokerClient.setCredentials({
         apiKeyId: alpacaApiKey,
@@ -114,6 +136,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCred
     setIsTestingSupabase(false);
   };
 
+  const handleTestTelegram = async () => {
+    setIsTestingTelegram(true);
+    setTelegramStatus(null);
+    try {
+      telegramService.saveConfig({
+        botToken: telegramToken.trim(),
+        chatId: telegramChatId.trim(),
+        enabled: telegramEnabled,
+        notifyHeartbeat: telegramNotifyHeartbeat,
+        notifyTrades: telegramNotifyTrades,
+        notifyPositionClose: telegramNotifyPositionClose,
+        notifyRiskAlerts: telegramNotifyRiskAlerts,
+      });
+
+      const res = await fetch('/api/notifications/telegram', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'TEST',
+          botToken: telegramToken.trim(),
+          chatId: telegramChatId.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setTelegramStatus({ success: true, message: '✓ Test message delivered to your Telegram chat successfully!' });
+      } else {
+        setTelegramStatus({ success: false, message: `Telegram error: ${data.error || 'Check Bot Token & Chat ID'}` });
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setTelegramStatus({ success: false, message: `Failed to connect: ${message}` });
+    } finally {
+      setIsTestingTelegram(false);
+    }
+  };
+
   const handleSave = async () => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('aitrader_alpaca_api_key', alpacaApiKey.trim());
@@ -124,6 +184,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCred
       localStorage.setItem('aitrader_supabase_url', supabaseUrl.trim());
       localStorage.setItem('aitrader_supabase_anon_key', supabaseAnonKey.trim());
     }
+
+    // Save Telegram config
+    telegramService.saveConfig({
+      botToken: telegramToken.trim(),
+      chatId: telegramChatId.trim(),
+      enabled: telegramEnabled,
+      notifyHeartbeat: telegramNotifyHeartbeat,
+      notifyTrades: telegramNotifyTrades,
+      notifyPositionClose: telegramNotifyPositionClose,
+      notifyRiskAlerts: telegramNotifyRiskAlerts,
+    });
 
     // Configure Supabase Client
     supabaseManager.setCredentials(supabaseUrl.trim(), supabaseAnonKey.trim());
@@ -377,6 +448,123 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCred
         <p className="text-[11px] text-gray-500 pt-1">
           💡 Database schema migration script is located at <code className="text-blue-400 font-mono">src/lib/db/migrations/001_initial_trading_schema.sql</code>. Run it once in your Supabase SQL editor to create all tables and indexes.
         </p>
+      </div>
+
+      {/* ── TELEGRAM REAL-TIME NOTIFICATIONS & HEARTBEAT ── */}
+      <div className="glass-panel p-6 rounded-2xl border border-gray-800 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Bell className="w-5 h-5 text-cyan-400" />
+            <div>
+              <h3 className="text-base font-bold text-white">Telegram Real-Time Notifications & 24/7 Heartbeat</h3>
+              <p className="text-xs text-gray-400">Receive automated trade fills, position exits, risk warnings, and scheduled heartbeats directly to your phone.</p>
+            </div>
+          </div>
+          <span className="text-[10px] px-2 py-1 rounded bg-cyan-500/20 text-cyan-400 font-bold border border-cyan-500/30">
+            BOT API
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="text-xs text-gray-300 font-semibold block mb-1">
+              Telegram Bot Token
+            </label>
+            <input
+              type="password"
+              placeholder="e.g. 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
+              value={telegramToken}
+              onChange={(e) => setTelegramToken(e.target.value)}
+              className="w-full bg-[#0B111E] border border-gray-800 rounded-lg px-3 py-2 text-xs text-white font-mono placeholder-gray-600 focus:outline-none focus:border-cyan-500"
+            />
+            <span className="text-[10px] text-gray-500 mt-1 block">
+              Create a free bot with <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="text-cyan-400 underline">@BotFather</a> on Telegram and paste the token here.
+            </span>
+          </div>
+
+          <div>
+            <label className="text-xs text-gray-300 font-semibold block mb-1">
+              Telegram Chat ID
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. 987654321 or -100123456789"
+              value={telegramChatId}
+              onChange={(e) => setTelegramChatId(e.target.value)}
+              className="w-full bg-[#0B111E] border border-gray-800 rounded-lg px-3 py-2 text-xs text-white font-mono placeholder-gray-600 focus:outline-none focus:border-cyan-500"
+            />
+            <span className="text-[10px] text-gray-500 mt-1 block">
+              Message <a href="https://t.me/userinfobot" target="_blank" rel="noreferrer" className="text-cyan-400 underline">@userinfobot</a> on Telegram to find your personal Chat ID or group ID.
+            </span>
+          </div>
+        </div>
+
+        {/* Notification Event Toggles */}
+        <div className="pt-2 pb-1 border-t border-gray-800/80">
+          <div className="text-xs font-bold text-gray-300 mb-2">Enabled Notification Streams:</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+            <label className="flex items-center gap-2 p-2.5 bg-[#080E1A] rounded-xl border border-gray-800 cursor-pointer hover:border-gray-700">
+              <input
+                type="checkbox"
+                checked={telegramNotifyHeartbeat}
+                onChange={(e) => setTelegramNotifyHeartbeat(e.target.checked)}
+                className="rounded accent-cyan-500"
+              />
+              <span className="text-gray-200">💓 24/7 Heartbeat</span>
+            </label>
+
+            <label className="flex items-center gap-2 p-2.5 bg-[#080E1A] rounded-xl border border-gray-800 cursor-pointer hover:border-gray-700">
+              <input
+                type="checkbox"
+                checked={telegramNotifyTrades}
+                onChange={(e) => setTelegramNotifyTrades(e.target.checked)}
+                className="rounded accent-cyan-500"
+              />
+              <span className="text-gray-200">🚀 Trade Executions</span>
+            </label>
+
+            <label className="flex items-center gap-2 p-2.5 bg-[#080E1A] rounded-xl border border-gray-800 cursor-pointer hover:border-gray-700">
+              <input
+                type="checkbox"
+                checked={telegramNotifyPositionClose}
+                onChange={(e) => setTelegramNotifyPositionClose(e.target.checked)}
+                className="rounded accent-cyan-500"
+              />
+              <span className="text-gray-200">🎯 Position Exits & P&L</span>
+            </label>
+
+            <label className="flex items-center gap-2 p-2.5 bg-[#080E1A] rounded-xl border border-gray-800 cursor-pointer hover:border-gray-700">
+              <input
+                type="checkbox"
+                checked={telegramNotifyRiskAlerts}
+                onChange={(e) => setTelegramNotifyRiskAlerts(e.target.checked)}
+                className="rounded accent-cyan-500"
+              />
+              <span className="text-gray-200">⚠️ Risk Gate Warnings</span>
+            </label>
+          </div>
+        </div>
+
+        {/* Test Connection Button & Status */}
+        <div className="pt-2 flex flex-wrap items-center gap-3">
+          <button
+            onClick={handleTestTelegram}
+            disabled={isTestingTelegram || !telegramToken.trim() || !telegramChatId.trim()}
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-cyan-600/20 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-600/30 flex items-center gap-2 transition-all disabled:opacity-50"
+          >
+            <Send className="w-3.5 h-3.5" />
+            {isTestingTelegram ? 'Sending Test...' : 'Send Test Heartbeat to Telegram'}
+          </button>
+
+          {telegramStatus && (
+            <div className={`text-xs flex items-center gap-1.5 font-medium ${
+              telegramStatus.success ? 'text-emerald-400' : 'text-rose-400'
+            }`}>
+              {telegramStatus.success ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+              {telegramStatus.message}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Grid: Data Source & AI Provider */}

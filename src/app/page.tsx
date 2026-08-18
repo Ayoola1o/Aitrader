@@ -17,6 +17,7 @@ import { alpacaBrokerClient, buildPortfolioFromAlpaca } from '@/lib/broker/alpac
 import { dbPersistence, generateDecisionId } from '@/lib/db/schema';
 import { tradingBotEngine, BotState, BotConfig } from '@/lib/bot/engine';
 import { applySettings, getStartingBalance, loadSettings } from '@/lib/settings';
+import { telegramService } from '@/lib/notifications/telegram';
 
 import { Sidebar, NavTabId } from '@/components/layout/Sidebar';
 import { TopHeader } from '@/components/layout/TopHeader';
@@ -245,9 +246,35 @@ export default function Home() {
         limitPrice
       );
       showNotification(result.success ? `Alpaca: ${result.message}` : `Alpaca Error: ${result.message}`);
+      if (result.success) {
+        telegramService.sendTradeExecutionAlert({
+          symbol: sym,
+          side,
+          size,
+          price: limitPrice || snapshot.price,
+          notional: size * (limitPrice || snapshot.price),
+          takeProfit,
+          stopLoss,
+          decisionReason: 'Manual trade order ticket',
+          source: 'MANUAL',
+        }).catch(() => {});
+      }
     } else {
       const result = paperBroker.submitOrder(sym, side, size, snapshot.price, stopLoss, takeProfit, 'MANUAL');
       showNotification(result.success ? `Manual ${side}: ${result.message}` : `Error: ${result.message}`);
+      if (result.success) {
+        telegramService.sendTradeExecutionAlert({
+          symbol: sym,
+          side,
+          size,
+          price: snapshot.price,
+          notional: size * snapshot.price,
+          takeProfit,
+          stopLoss,
+          decisionReason: 'Manual paper trade ticket',
+          source: 'MANUAL',
+        }).catch(() => {});
+      }
     }
     await updateMarket();
   };
@@ -274,6 +301,16 @@ export default function Home() {
       try {
         await alpacaBrokerClient.closePosition(pos.symbol);
         showNotification(`Closed ${pos.symbol} position on Alpaca`);
+        telegramService.sendPositionClosedAlert({
+          symbol: pos.symbol,
+          side: pos.side,
+          entryPrice: pos.entryPrice,
+          exitPrice: snapshot.price,
+          size: pos.size,
+          realizedPnL: pos.unrealizedPnL,
+          pnlPercent: pos.entryPrice > 0 ? ((snapshot.price - pos.entryPrice) / pos.entryPrice) * 100 : 0,
+          closeReason: 'MANUAL_CLOSE',
+        }).catch(() => {});
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         showNotification(`Alpaca Error: ${message}`);
@@ -283,6 +320,18 @@ export default function Home() {
       showNotification(
         result.success ? `Closed position (PnL: $${result.pnl?.toFixed(2) ?? '0'})` : `Error: ${result.message}`
       );
+      if (result.success && pos) {
+        telegramService.sendPositionClosedAlert({
+          symbol: pos.symbol,
+          side: pos.side,
+          entryPrice: pos.entryPrice,
+          exitPrice: snapshot.price,
+          size: pos.size,
+          realizedPnL: result.pnl || 0,
+          pnlPercent: pos.entryPrice > 0 ? ((snapshot.price - pos.entryPrice) / pos.entryPrice) * 100 : 0,
+          closeReason: 'MANUAL_CLOSE',
+        }).catch(() => {});
+      }
     }
     await updateMarket();
   };

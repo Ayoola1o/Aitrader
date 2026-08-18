@@ -9,6 +9,7 @@ import { deterministicRiskEngine } from '@/lib/risk/engine';
 import { generateDecisionId } from '@/lib/db/schema';
 import { alpacaBrokerClient, buildPortfolioFromAlpaca } from '@/lib/broker/alpaca';
 import { paperBroker } from '@/lib/broker/paper';
+import { telegramService } from '@/lib/notifications/telegram';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Allow full 60s for Vercel serverless functions
@@ -257,6 +258,19 @@ async function handleCronCycle(req: NextRequest) {
           level: 'ACTION',
           message: `✓ EXECUTED: ${side} ${size} ${symbol} (~$${notionalVal}) — SL:$${sl.toFixed(2)} TP:$${tp.toFixed(2)}`,
         });
+
+        // Dispatch instant Telegram alert
+        telegramService.sendTradeExecutionAlert({
+          symbol,
+          side,
+          size,
+          price: snap.price,
+          notional: Number(notionalVal),
+          takeProfit: tp,
+          stopLoss: sl,
+          decisionReason: dec.reasoning[0] || 'AI Specialist Agent consensus',
+          source: 'AI_BOT',
+        }).catch(() => {});
       } else {
         consecutiveNoTrades++;
         cycleLogs.push({
