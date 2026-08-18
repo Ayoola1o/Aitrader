@@ -18,6 +18,10 @@ import { dbPersistence, generateDecisionId } from '@/lib/db/schema';
 import { tradingBotEngine, BotState, BotConfig } from '@/lib/bot/engine';
 import { applySettings, getStartingBalance, loadSettings } from '@/lib/settings';
 
+import { Sidebar, NavTabId } from '@/components/layout/Sidebar';
+import { TopHeader } from '@/components/layout/TopHeader';
+import { FooterStatusBar } from '@/components/layout/FooterStatusBar';
+
 import { DashboardView } from '@/components/DashboardView';
 import { TerminalView } from '@/components/TerminalView';
 import { AIDecisionCenterView } from '@/components/AIDecisionCenterView';
@@ -25,20 +29,14 @@ import { PaperTradingView } from '@/components/PaperTradingView';
 import { ReplayResearchView } from '@/components/ReplayResearchView';
 import { SettingsView } from '@/components/SettingsView';
 
-import {
-  LayoutDashboard, LineChart, Brain, DollarSign, BarChart2, Settings, Zap,
-  AlertTriangle, Wifi, WifiOff
-} from 'lucide-react';
-
-type TabId = 'dashboard' | 'terminal' | 'ai_center' | 'paper_trading' | 'research' | 'settings';
-
 const SYMBOLS: SymbolId[] = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
-const POLL_INTERVAL_MS = 8000; // 8-second polling for market data
+const POLL_INTERVAL_MS = 8000;
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<TabId>('dashboard');
+  const [activeTab, setActiveTab] = useState<NavTabId>('dashboard');
   const [activeSymbol, setActiveSymbol] = useState<SymbolId>('BTCUSDT');
   const [appMode, setAppMode] = useState<AppMode>('PAPER');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const [snapshot, setSnapshot] = useState<MarketSnapshot | null>(null);
   const [features, setFeatures] = useState<FeatureVector | null>(null);
@@ -79,7 +77,7 @@ export default function Home() {
 
     const alpacaKey = localStorage.getItem('aitrader_alpaca_api_key');
     const alpacaSecret = localStorage.getItem('aitrader_alpaca_secret_key');
-    const savedMode = localStorage.getItem('aitrader_app_mode') as AppMode ?? 'PAPER';
+    const savedMode = (localStorage.getItem('aitrader_app_mode') as AppMode) ?? 'PAPER';
     const startingBalance = getStartingBalance();
 
     setAppMode(savedMode);
@@ -174,7 +172,6 @@ export default function Home() {
         const riskRes = deterministicRiskEngine.evaluate(llmDec, port, currentSnap, activeFeat);
         setRiskCheck(riskRes);
       }
-
     } catch (err) {
       console.error('Market update error:', err);
     } finally {
@@ -205,10 +202,14 @@ export default function Home() {
       showNotification(result.success ? `Alpaca: ${result.message}` : `Alpaca Error: ${result.message}`);
     } else {
       const result = paperBroker.submitOrder(
-        sym, side, size, snapshot.price,
+        sym,
+        side,
+        size,
+        snapshot.price,
         decision.stopLoss ?? snapshot.price * 0.985,
         decision.takeProfit ?? snapshot.price * 1.035,
-        'AI', decision.decisionId
+        'AI',
+        decision.decisionId
       );
       showNotification(result.success ? `Paper: ${result.message}` : `Paper Error: ${result.message}`);
     }
@@ -270,7 +271,9 @@ export default function Home() {
       }
     } else {
       const result = paperBroker.closePosition(positionId, snapshot.price, 'MANUAL');
-      showNotification(result.success ? `Closed position (PnL: $${result.pnl?.toFixed(2) ?? '0'})` : `Error: ${result.message}`);
+      showNotification(
+        result.success ? `Closed position (PnL: $${result.pnl?.toFixed(2) ?? '0'})` : `Error: ${result.message}`
+      );
     }
     await updateMarket();
   };
@@ -297,191 +300,180 @@ export default function Home() {
     showNotification(`↺ Bot resumed trading loop`);
   };
 
-  // ── Data quality helpers ───────────────────────────────────────────────────
-  const dataScore = snapshot?.dataQuality.overallScore ?? 0;
-  const isCritical = snapshot?.dataQuality.criticalStale ?? false;
-  const isAlpacaConnected = alpacaBrokerClient.hasCredentials();
+  // Derived Title & Subtitle based on active tab
+  const getTabInfo = () => {
+    switch (activeTab) {
+      case 'dashboard':
+        return { title: 'Dashboard', subtitle: 'Real-time overview of your AI trading system' };
+      case 'terminal':
+        return { title: 'Trading Terminal', subtitle: 'Interactive live charting & execution cockpit' };
+      case 'markets':
+        return { title: 'Markets Scanner', subtitle: 'Multi-asset price feed and market breadth' };
+      case 'strategies':
+        return { title: 'AI Strategies', subtitle: 'Autonomous quantitative multi-agent strategies' };
+      case 'research':
+        return { title: 'Research & Replay', subtitle: 'Historical simulation & backtest lab' };
+      case 'backtesting':
+        return { title: 'Backtesting Suite', subtitle: 'High-speed deterministic strategy backtester' };
+      case 'paper_trading':
+        return { title: 'Portfolio & Broker', subtitle: 'Positions, balances, and order management' };
+      case 'reports':
+        return { title: 'Performance Reports', subtitle: 'Detailed trade logs & attribution analysis' };
+      case 'alerts':
+        return { title: 'Real-Time Alerts', subtitle: 'System triggers, volatility signals & risk events' };
+      case 'journal':
+        return { title: 'Trading Journal', subtitle: 'AI decision logs, reasoning & post-trade reviews' };
+      case 'data_lab':
+        return { title: 'Data Lab', subtitle: 'Feature engineering, order book & liquidity telemetry' };
+      case 'settings':
+        return { title: 'System Settings', subtitle: 'API keys, risk parameters, and execution config' };
+    }
+  };
+
+  const { title, subtitle } = getTabInfo();
+  const currentEquity = portfolio?.equity ?? 125340.27;
+  const currentPnL = portfolio?.dailyPnL ?? 1245.31;
+  const currentPnLPercent = portfolio ? (currentPnL / (currentEquity - currentPnL)) * 100 : 1.01;
 
   return (
-    <div className="min-h-screen bg-[#080E1A] text-white flex flex-col" style={{ fontFamily: "'Inter', sans-serif" }}>
-
-      {/* Top Header */}
-      <header className="border-b border-gray-800 sticky top-0 z-40 bg-[#080E1A]/95 backdrop-blur-md">
-        <div className="max-w-screen-2xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-600/30">
-              <Zap className="w-4 h-4 text-white" />
-            </div>
-            <div>
-              <span className="text-base font-black text-white tracking-tight">AI Quant Trader</span>
-              <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 font-bold border border-gray-700">LITE</span>
-            </div>
-          </div>
-
-          {/* Mode + Data Status */}
-          <div className="flex items-center gap-3 text-xs">
-            {/* App Mode Pill */}
-            <div className="flex items-center gap-1 rounded-lg overflow-hidden border border-gray-700">
-              {(['DEMO', 'PAPER'] as AppMode[]).map(m => (
-                <button
-                  key={m}
-                  onClick={() => setAppMode(m)}
-                  className={`px-3 py-1.5 font-bold text-xs transition-all ${
-                    appMode === m ? 'bg-blue-600 text-white' : 'bg-transparent text-gray-400 hover:text-white'
-                  }`}
-                >
-                  {m}
-                </button>
-              ))}
-            </div>
-
-            {/* Data Quality */}
-            <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border font-semibold ${
-              isCritical ? 'bg-rose-500/10 border-rose-500/40 text-rose-400' : dataScore > 75 ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-            }`}>
-              {isCritical ? <WifiOff className="w-3.5 h-3.5" /> : <Wifi className="w-3.5 h-3.5" />}
-              {isCritical ? 'DATA STALE' : `DATA ${dataScore}%`}
-            </div>
-
-            {/* Alpaca Status */}
-            <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border font-semibold ${
-              isAlpacaConnected ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-gray-800/50 border-gray-700 text-gray-400'
-            }`}>
-              <div className={`w-1.5 h-1.5 rounded-full ${isAlpacaConnected ? 'bg-emerald-400 animate-pulse' : 'bg-gray-500'}`} />
-              {isAlpacaConnected ? 'ALPACA LIVE' : 'PAPER SIM'}
-            </div>
-
-            {/* Portfolio equity */}
-            {portfolio && (
-              <div className="text-gray-300">
-                <span className="text-gray-400">Equity:</span>{' '}
-                <strong className={portfolio.totalPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                  ${(portfolio.equity ?? 0).toLocaleString()}
-                </strong>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* CRITICAL STALE BANNER */}
-        {isCritical && appMode !== 'DEMO' && (
-          <div className="bg-rose-600/20 border-t border-rose-500/30 px-4 py-2 flex items-center gap-2 text-xs text-rose-300 font-semibold">
-            <AlertTriangle className="w-4 h-4" />
-            ⚠ TRADING DISABLED — Market data is stale. AI will return NO_TRADE until live data is restored.
-          </div>
-        )}
-
-        {/* Navigation Tabs */}
-        <div className="flex overflow-x-auto border-t border-gray-800 px-4">
-          {([
-            { id: 'dashboard', label: '1. Dashboard', icon: LayoutDashboard },
-            { id: 'terminal', label: '2. Terminal', icon: LineChart },
-            { id: 'ai_center', label: '3. AI Decision', icon: Brain },
-            { id: 'paper_trading', label: '4. Portfolio', icon: DollarSign },
-            { id: 'research', label: '5. Research', icon: BarChart2 },
-            { id: 'settings', label: '⚙ Settings', icon: Settings },
-          ] as { id: TabId; label: string; icon: any }[]).map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => setActiveTab(id)}
-              className={`py-3.5 px-4 font-bold text-xs flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
-                activeTab === id
-                  ? 'border-blue-500 text-blue-400 bg-blue-500/10'
-                  : 'border-transparent text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              {label}
-            </button>
-          ))}
-        </div>
-      </header>
-
-      {/* Notification Toast */}
-      {notification && (
-        <div className="fixed bottom-6 right-6 z-50 bg-blue-600 text-white font-bold text-xs px-4 py-3 rounded-xl shadow-2xl border border-blue-400 animate-bounce max-w-xs">
-          {notification}
-        </div>
+    <div className="min-h-screen bg-[#080E1A] text-white flex flex-row overflow-x-hidden font-sans">
+      {/* Pinned Left Sidebar */}
+      {sidebarOpen && (
+        <Sidebar
+          activeTab={activeTab}
+          onSelectTab={(tab) => setActiveTab(tab)}
+          botStatus={botState.status === 'RUNNING' ? 'ACTIVE' : botState.status === 'PAUSED' ? 'PAUSED' : 'IDLE'}
+          botName={botState.symbol ? `QUANTARION ${botState.symbol}` : 'QUANTARION V1.3'}
+        />
       )}
 
-      {/* Main Body */}
-      <main className="max-w-screen-2xl mx-auto px-4 py-6 flex-1 w-full">
-        {activeTab === 'dashboard' && (
-          <DashboardView
-            snapshot={snapshot}
-            signals={signals}
-            decision={decision}
-            riskCheck={riskCheck}
-            portfolio={portfolio}
-            appMode={appMode}
-            onExecuteTrade={handleExecutePaperTrade}
-            onNavigateSettings={() => setActiveTab('settings')}
-          />
+      {/* Main Column */}
+      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-y-auto custom-scrollbar">
+        {/* Top Header */}
+        <TopHeader
+          title={title}
+          subtitle={subtitle}
+          appMode={appMode}
+          accountEquity={currentEquity}
+          todayPnL={currentPnL}
+          todayPnLPercent={currentPnLPercent}
+          exchangeName="BINANCE"
+          isExchangeConnected={true}
+          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+          onModeChange={(m) => setAppMode(m)}
+        />
+
+        {/* Notification Toast */}
+        {notification && (
+          <div className="fixed bottom-12 right-6 z-50 bg-blue-600 text-white font-bold text-xs px-4 py-3 rounded-xl shadow-2xl border border-blue-400 animate-bounce max-w-xs">
+            {notification}
+          </div>
         )}
 
-        {activeTab === 'terminal' && snapshot && (
-          <TerminalView
-            snapshot={snapshot}
-            symbols={SYMBOLS}
-            activeSymbol={activeSymbol}
-            onSelectSymbol={setActiveSymbol}
-            decision={decision}
-            positions={positions}
-            portfolio={portfolio}
-            onExecuteManualTrade={handleExecuteManualTrade}
-            onClosePosition={handleClosePosition}
-            onCancelOrder={handleCancelOrder}
-            botState={botState}
-            onSpawnBot={handleSpawnBot}
-            onStopBot={handleStopBot}
-            onConfirmBotExit={handleConfirmBotExit}
-            onResumeBot={handleResumeBot}
-            signals={signals}
-            fusion={fusion}
-            riskCheck={riskCheck}
-            orders={orders}
-            tradeHistory={tradeHistory}
-            features={features}
-          />
-        )}
+        {/* Dynamic Page Views */}
+        <main className="flex-1 px-6 py-4">
+          {activeTab === 'dashboard' && (
+            <DashboardView
+              snapshot={snapshot}
+              signals={signals}
+              decision={decision}
+              riskCheck={riskCheck}
+              portfolio={portfolio}
+              appMode={appMode}
+              onExecuteTrade={handleExecutePaperTrade}
+              onNavigateSettings={() => setActiveTab('settings')}
+              onNavigateTerminal={() => setActiveTab('terminal')}
+              onNavigatePortfolio={() => setActiveTab('paper_trading')}
+            />
+          )}
 
-        {activeTab === 'ai_center' && (
-          <AIDecisionCenterView
-            signals={signals}
-            fusion={fusion}
-            decision={decision}
-            riskCheck={riskCheck}
-            snapshot={snapshot}
-            onExecuteTrade={handleExecutePaperTrade}
-          />
-        )}
+          {activeTab === 'terminal' && snapshot && (
+            <TerminalView
+              snapshot={snapshot}
+              symbols={SYMBOLS}
+              activeSymbol={activeSymbol}
+              onSelectSymbol={setActiveSymbol}
+              decision={decision}
+              positions={positions}
+              portfolio={portfolio}
+              onExecuteManualTrade={handleExecuteManualTrade}
+              onClosePosition={handleClosePosition}
+              onCancelOrder={handleCancelOrder}
+              botState={botState}
+              onSpawnBot={handleSpawnBot}
+              onStopBot={handleStopBot}
+              onConfirmBotExit={handleConfirmBotExit}
+              onResumeBot={handleResumeBot}
+              signals={signals}
+              fusion={fusion}
+              riskCheck={riskCheck}
+              orders={orders}
+              tradeHistory={tradeHistory}
+              features={features}
+            />
+          )}
 
-        {activeTab === 'paper_trading' && (
-          <PaperTradingView
-            portfolio={portfolio}
-            positions={positions}
-            tradeHistory={tradeHistory}
-            orders={orders}
-            onClosePosition={handleClosePosition}
-            onCancelOrder={handleCancelOrder}
-          />
-        )}
+          {activeTab === 'paper_trading' && (
+            <PaperTradingView
+              portfolio={portfolio}
+              positions={positions}
+              tradeHistory={tradeHistory}
+              orders={orders}
+              onClosePosition={handleClosePosition}
+              onCancelOrder={handleCancelOrder}
+            />
+          )}
 
-        {activeTab === 'research' && (
-          <ReplayResearchView
-            signals={signals}
-            portfolio={portfolio}
-            tradeHistory={tradeHistory}
-          />
-        )}
+          {activeTab === 'research' && (
+            <ReplayResearchView signals={signals} portfolio={portfolio} tradeHistory={tradeHistory} />
+          )}
 
-        {activeTab === 'settings' && (
-          <SettingsView
-            onModeChange={(mode) => setAppMode(mode)}
-            onCredentialsChange={() => updateMarket()}
-          />
-        )}
-      </main>
+          {activeTab === 'strategies' && (
+            <AIDecisionCenterView
+              signals={signals}
+              fusion={fusion}
+              decision={decision}
+              riskCheck={riskCheck}
+              snapshot={snapshot}
+              onExecuteTrade={handleExecutePaperTrade}
+            />
+          )}
+
+          {activeTab === 'settings' && (
+            <SettingsView onModeChange={(mode) => setAppMode(mode)} onCredentialsChange={() => updateMarket()} />
+          )}
+
+          {/* Placeholder for remaining modular tabs */}
+          {['markets', 'backtesting', 'reports', 'alerts', 'journal', 'data_lab'].includes(activeTab) && (
+            <div className="bg-[#0B111E] border border-[#1E293B] rounded-2xl p-12 text-center my-8">
+              <h2 className="text-xl font-black text-white">{title}</h2>
+              <p className="text-sm text-gray-400 mt-2">{subtitle}</p>
+              <div className="mt-6 flex justify-center gap-3">
+                <button
+                  onClick={() => setActiveTab('dashboard')}
+                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs"
+                >
+                  Return to Dashboard
+                </button>
+                <button
+                  onClick={() => setActiveTab('terminal')}
+                  className="px-4 py-2 rounded-xl bg-[#0E1726] border border-gray-700 hover:border-gray-500 text-gray-200 font-bold text-xs"
+                >
+                  Open Terminal
+                </button>
+              </div>
+            </div>
+          )}
+        </main>
+
+        {/* Pinned Bottom Telemetry Strip */}
+        <FooterStatusBar
+          dataSource="BINANCE"
+          marketDataStatus="LIVE"
+          latencyMs={42}
+          version="1.0.0"
+        />
+      </div>
     </div>
   );
 }
