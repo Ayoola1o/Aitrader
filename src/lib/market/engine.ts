@@ -72,7 +72,10 @@ export class MarketEngine {
   } | null> {
     if (typeof window === 'undefined') return null;
     try {
-      const res = await fetch(`/api/market?symbol=${symbol}`, { cache: 'no-store' });
+      const res = await fetch(`/api/market?symbol=${symbol}`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(3000),
+      });
       if (!res.ok) return null;
       const d = await res.json();
       if (!d.success) return null;
@@ -88,7 +91,7 @@ export class MarketEngine {
           low24h: d.ticker.low24h,
           volume24h: d.ticker.volume24h,
           fetchedAt: d.ticker.fetchedAt || Date.now(),
-          source: d.ticker.source || 'binance',
+          source: d.ticker.source || 'market-api',
         };
       }
 
@@ -96,7 +99,7 @@ export class MarketEngine {
       if (d.orderBook) {
         const mapLevels = (arr: { price: number; size: number }[]): OrderBookLevel[] => {
           let total = 0;
-          return arr.map(item => {
+          return arr.map((item) => {
             total += item.size;
             return { price: item.price, size: item.size, total };
           });
@@ -105,7 +108,7 @@ export class MarketEngine {
           bids: mapLevels(d.orderBook.bids || []),
           asks: mapLevels(d.orderBook.asks || []),
           fetchedAt: d.orderBook.fetchedAt || Date.now(),
-          source: d.orderBook.source || 'binance',
+          source: d.orderBook.source || 'market-api',
         };
       }
 
@@ -114,93 +117,11 @@ export class MarketEngine {
         candles = {
           candles: d.candles.candles,
           fetchedAt: d.candles.fetchedAt || Date.now(),
-          source: d.candles.source || 'binance',
+          source: d.candles.source || 'market-api',
         };
       }
 
       return { ticker, orderBook, candles };
-    } catch {
-      return null;
-    }
-  }
-
-  // ── Binance Direct REST Fallback ─────────────────────────────────────────
-  private async fetchBinanceTicker(symbol: SymbolId): Promise<LiveTickerData | null> {
-    try {
-      const [tickerRes, bookRes] = await Promise.allSettled([
-        fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`, { cache: 'no-store' }),
-        fetch(`https://api.binance.com/api/v3/ticker/bookTicker?symbol=${symbol}`, { cache: 'no-store' }),
-      ]);
-
-      let price: number | null = null;
-      let change24h = 0, high24h = 0, low24h = 0, volume24h = 0;
-      let bid = 0, ask = 0;
-
-      if (tickerRes.status === 'fulfilled' && tickerRes.value.ok) {
-        const d = await tickerRes.value.json();
-        price = parseFloat(d.lastPrice);
-        change24h = parseFloat(d.priceChangePercent);
-        high24h = parseFloat(d.highPrice);
-        low24h = parseFloat(d.lowPrice);
-        volume24h = parseFloat(d.volume);
-      }
-
-      if (bookRes.status === 'fulfilled' && bookRes.value.ok) {
-        const d = await bookRes.value.json();
-        bid = parseFloat(d.bidPrice);
-        ask = parseFloat(d.askPrice);
-        if (!price) price = (bid + ask) / 2;
-      }
-
-      if (!price) return null;
-
-      return {
-        price,
-        bid: bid || price * 0.9999,
-        ask: ask || price * 1.0001,
-        change24h,
-        high24h: high24h || price * 1.02,
-        low24h: low24h || price * 0.98,
-        volume24h,
-        fetchedAt: Date.now(),
-        source: 'binance',
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  // ── Alpaca REST Fallback ─────────────────────────────────────────────────
-  private async fetchAlpacaTicker(symbol: SymbolId): Promise<LiveTickerData | null> {
-    if (!this.alpacaCredentials) return null;
-    try {
-      const alpacaSymbol = symbol.replace('USDT', '/USD');
-      const url = `https://data.alpaca.markets/v1beta3/crypto/us/latest/trades?symbols=${alpacaSymbol}`;
-      const res = await fetch(url, {
-        headers: {
-          'APCA-API-KEY-ID': this.alpacaCredentials.key,
-          'APCA-API-SECRET-KEY': this.alpacaCredentials.secret,
-        },
-        cache: 'no-store',
-      });
-      if (!res.ok) return null;
-      const data = await res.json();
-      const trade = data.trades?.[alpacaSymbol];
-      if (!trade) return null;
-
-      const price = parseFloat(trade.p);
-      const last = this.lastTicker[symbol];
-      return {
-        price,
-        bid: price * 0.9999,
-        ask: price * 1.0001,
-        change24h: last ? ((price - last.price) / last.price) * 100 : 0,
-        high24h: last?.high24h || price * 1.02,
-        low24h: last?.low24h || price * 0.98,
-        volume24h: last?.volume24h || 0,
-        fetchedAt: Date.now(),
-        source: 'alpaca',
-      };
     } catch {
       return null;
     }
@@ -217,7 +138,8 @@ export class MarketEngine {
       const askP = Number((price + i * price * 0.0001).toFixed(price > 100 ? 2 : 4));
       const bidS = Number((Math.exp(-i * 0.15) * (price > 1000 ? 2 : 200)).toFixed(4));
       const askS = Number((Math.exp(-i * 0.15) * (price > 1000 ? 2 : 200)).toFixed(4));
-      bidTotal += bidS; askTotal += askS;
+      bidTotal += bidS;
+      askTotal += askS;
       bids.push({ price: bidP, size: bidS, total: bidTotal });
       asks.push({ price: askP, size: askS, total: askTotal });
     }
@@ -225,11 +147,11 @@ export class MarketEngine {
   }
 
   private buildSimulatedCandles(price: number): LiveCandlesData {
-    const now = Date.now();
     const candles: Candle[] = [];
+    const now = Date.now();
     let p = price * 0.98;
     for (let i = 100; i >= 0; i--) {
-      const chg = (Math.sin(i * 0.15) * 0.002) + (i % 7 === 0 ? 0.003 : -0.001);
+      const chg = Math.sin(i * 0.15) * 0.002 + (i % 7 === 0 ? 0.003 : -0.001);
       const open = p;
       const close = p * (1 + chg);
       const high = Math.max(open, close) * 1.0008;
@@ -244,7 +166,7 @@ export class MarketEngine {
   public async tick(symbol: SymbolId): Promise<MarketSnapshot> {
     const now = Date.now();
 
-    // 1. Try Server Proxy first (multi-exchange: Binance, Binance US, Coinbase, Kraken)
+    // 1. Fetch through Next.js Server Proxy (supports CoinGecko, Alpaca, Binance, Coinbase)
     const proxyData = await this.fetchMarketApiProxy(symbol);
 
     let activeTicker: LiveTickerData | null = null;
@@ -256,15 +178,7 @@ export class MarketEngine {
       activeTicker = proxyData.ticker;
       if (proxyData.orderBook) this.lastOrderBook[symbol] = proxyData.orderBook;
       if (proxyData.candles) this.lastCandles[symbol] = proxyData.candles;
-    }
-
-    // 2. Direct fallbacks if proxy not available
-    if (!activeTicker) {
-      let ticker = await this.fetchBinanceTicker(symbol);
-      if (!ticker) ticker = await this.fetchAlpacaTicker(symbol);
-      if (ticker) {
-        this.lastTicker[symbol] = ticker;
-      }
+    } else {
       activeTicker = this.lastTicker[symbol] ?? null;
     }
 

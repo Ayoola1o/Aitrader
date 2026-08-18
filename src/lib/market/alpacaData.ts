@@ -1,33 +1,28 @@
-import { SymbolId, Candle, MarketSnapshot } from '@/types/trading';
+import { SymbolId, Candle } from '@/types/trading';
 
 export class AlpacaLiveMarketData {
   public async fetchLiveBars(symbol: SymbolId): Promise<Candle[]> {
     try {
-      // Fetch live market candles from Binance Public Data API
-      const symbolMap: Record<SymbolId, string> = {
-        BTCUSDT: 'BTCUSDT',
-        ETHUSDT: 'ETHUSDT',
-        SOLUSDT: 'SOLUSDT',
-        XRPUSDT: 'XRPUSDT',
-      };
+      const res = await fetch(`/api/market?symbol=${symbol}&type=candles`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(3000),
+      });
 
-      const pairs = symbolMap[symbol] || 'BTCUSDT';
-      const url = `https://api.binance.com/api/v3/klines?symbol=${pairs}&interval=1m&limit=100`;
-      const res = await fetch(url);
-
-      if (!res.ok) throw new Error('Live data request failed');
+      if (!res.ok) return [];
 
       const data = await res.json();
-      return data.map((k: any[]) => ({
-        time: k[0],
-        open: parseFloat(k[1]),
-        high: parseFloat(k[2]),
-        low: parseFloat(k[3]),
-        close: parseFloat(k[4]),
-        volume: parseFloat(k[5]),
-      }));
+      if (data.success && Array.isArray(data.candles?.candles)) {
+        return data.candles.candles.map((k: any) => ({
+          time: k.timestamp || k.time || Date.now(),
+          open: parseFloat(k.open),
+          high: parseFloat(k.high),
+          low: parseFloat(k.low),
+          close: parseFloat(k.close),
+          volume: parseFloat(k.volume) || 10,
+        }));
+      }
+      return [];
     } catch {
-      // Fallback generator if network blocks public API
       return [];
     }
   }
@@ -40,20 +35,24 @@ export class AlpacaLiveMarketData {
     volume24h: number;
   } | null> {
     try {
-      const pairs = symbol.toUpperCase();
-      const url = `https://api.binance.com/api/v3/ticker/24hr?symbol=${pairs}`;
-      const res = await fetch(url);
+      const res = await fetch(`/api/market?symbol=${symbol}&type=ticker`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(3000),
+      });
 
       if (!res.ok) return null;
 
       const data = await res.json();
-      return {
-        price: parseFloat(data.lastPrice),
-        change24h: parseFloat(data.priceChangePercent),
-        high24h: parseFloat(data.highPrice),
-        low24h: parseFloat(data.lowPrice),
-        volume24h: parseFloat(data.volume),
-      };
+      if (data.success && data.ticker) {
+        return {
+          price: parseFloat(data.ticker.price),
+          change24h: parseFloat(data.ticker.change24h || 0),
+          high24h: parseFloat(data.ticker.high24h || data.ticker.price * 1.015),
+          low24h: parseFloat(data.ticker.low24h || data.ticker.price * 0.985),
+          volume24h: parseFloat(data.ticker.volume24h || 1000000),
+        };
+      }
+      return null;
     } catch {
       return null;
     }
