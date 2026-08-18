@@ -25,6 +25,7 @@ import { FooterStatusBar } from '@/components/layout/FooterStatusBar';
 import { DashboardView } from '@/components/DashboardView';
 import { TerminalView } from '@/components/TerminalView';
 import { StrategyView } from '@/components/StrategyView';
+import { AlertsView } from '@/components/AlertsView';
 import { AIDecisionCenterView } from '@/components/AIDecisionCenterView';
 import { PaperTradingView } from '@/components/PaperTradingView';
 import { ReplayResearchView } from '@/components/ReplayResearchView';
@@ -438,12 +439,14 @@ export default function Home() {
             />
           )}
 
+          {activeTab === 'alerts' && <AlertsView />}
+
           {activeTab === 'settings' && (
             <SettingsView onModeChange={(mode) => setAppMode(mode)} onCredentialsChange={() => updateMarket()} />
           )}
 
           {/* Placeholder for remaining modular tabs */}
-          {['markets', 'backtesting', 'reports', 'alerts', 'journal', 'data_lab'].includes(activeTab) && (
+          {['markets', 'backtesting', 'reports', 'journal', 'data_lab'].includes(activeTab) && (
             <div className="bg-[#0B111E] border border-[#1E293B] rounded-2xl p-12 text-center my-8">
               <h2 className="text-xl font-black text-white">{title}</h2>
               <p className="text-sm text-gray-400 mt-2">{subtitle}</p>
