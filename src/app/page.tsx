@@ -24,6 +24,7 @@ import { FooterStatusBar } from '@/components/layout/FooterStatusBar';
 
 import { DashboardView } from '@/components/DashboardView';
 import { TerminalView } from '@/components/TerminalView';
+import { StrategyView } from '@/components/StrategyView';
 import { AIDecisionCenterView } from '@/components/AIDecisionCenterView';
 import { PaperTradingView } from '@/components/PaperTradingView';
 import { ReplayResearchView } from '@/components/ReplayResearchView';
@@ -421,6 +422,7 @@ export default function Home() {
               orders={orders}
               onClosePosition={handleClosePosition}
               onCancelOrder={handleCancelOrder}
+              onNavigateSettings={() => setActiveTab('settings')}
             />
           )}
 
@@ -429,13 +431,10 @@ export default function Home() {
           )}
 
           {activeTab === 'strategies' && (
-            <AIDecisionCenterView
-              signals={signals}
-              fusion={fusion}
-              decision={decision}
-              riskCheck={riskCheck}
-              snapshot={snapshot}
-              onExecuteTrade={handleExecutePaperTrade}
+            <StrategyView
+              onNavigateDashboard={() => setActiveTab('dashboard')}
+              onNavigateTerminal={() => setActiveTab('terminal')}
+              onNavigateSettings={() => setActiveTab('settings')}
             />
           )}
 
