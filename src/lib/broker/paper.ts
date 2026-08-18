@@ -1,4 +1,5 @@
 import { SymbolId, Order, Position, TradeHistoryItem, PortfolioState } from '@/types/trading';
+import { dbPersistence } from '@/lib/db/schema';
 
 const TAKER_FEE = 0.0005; // 0.05%
 const SLIPPAGE_PCT = 0.0002; // 0.02% per market order
@@ -144,6 +145,12 @@ export class PaperBroker {
       rMultiple: Number(rMultiple.toFixed(2)),
     });
 
+    const closedTrade = this.tradeHistory[this.tradeHistory.length - 1];
+    dbPersistence.saveTrade(closedTrade);
+    if (pos.decisionId) {
+      dbPersistence.updateDecisionOutcome(pos.decisionId, closedTrade);
+    }
+
     this.positions.delete(positionId);
     this.equityCurve.push({ time: Date.now(), equity: this.getEquity(marketPrice) });
     return { success: true, pnl: Number(netPnL.toFixed(2)) };
@@ -238,6 +245,15 @@ export class PaperBroker {
       losingTrades: losses.length,
       equityCurve: this.equityCurve.slice(-200),
     };
+  }
+
+  cancelOrder(orderId: string): boolean {
+    const order = this.orders.find((o) => o.id === orderId);
+    if (order && order.status === 'PENDING') {
+      order.status = 'CANCELLED';
+      return true;
+    }
+    return false;
   }
 
   getPositions(): Position[] { return Array.from(this.positions.values()); }

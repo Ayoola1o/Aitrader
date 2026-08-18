@@ -13,9 +13,19 @@ const DEFAULT_WEIGHTS: Record<string, number> = {
 };
 
 const CONFLICT_THRESHOLD = 0.35; // if buy vs sell diverge by < this, conflict
-const NO_TRADE_CONFIDENCE_FLOOR = 0.68; // minimum confidence to trade
+const DEFAULT_CONFIDENCE_FLOOR = 0.68; // minimum confidence to trade
+
+interface FusionConfig {
+  confidenceFloor: number;
+}
 
 export class SignalFusionEngine {
+  private config: FusionConfig = { confidenceFloor: DEFAULT_CONFIDENCE_FLOOR };
+
+  setConfig(config: Partial<FusionConfig>) {
+    this.config = { ...this.config, ...config };
+  }
+
   fuseSignals(signals: AgentSignal[], regime: RegimeType): SignalFusionResult {
     const weights = { ...DEFAULT_WEIGHTS };
 
@@ -97,9 +107,10 @@ export class SignalFusionEngine {
     const confidence = conflictingSignals ? 0.4 : Math.min(0.95, 0.45 + spread * 0.8);
 
     // Enforce minimum confidence floor
-    if (confidence < NO_TRADE_CONFIDENCE_FLOOR && dominantAction !== 'NO_TRADE' && dominantAction !== 'HOLD') {
+    const floor = this.config.confidenceFloor;
+    if (confidence < floor && dominantAction !== 'NO_TRADE' && dominantAction !== 'HOLD') {
       dominantAction = 'NO_TRADE';
-      abstainReason = `Confidence ${(confidence * 100).toFixed(0)}% below minimum threshold ${(NO_TRADE_CONFIDENCE_FLOOR * 100).toFixed(0)}%`;
+      abstainReason = `Confidence ${(confidence * 100).toFixed(0)}% below minimum threshold ${(floor * 100).toFixed(0)}%`;
     }
 
     return {

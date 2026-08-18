@@ -13,9 +13,10 @@ import { signalFusionEngine } from '@/lib/fusion/engine';
 import { aiProviderManager } from '@/lib/llm/providers';
 import { deterministicRiskEngine } from '@/lib/risk/engine';
 import { paperBroker } from '@/lib/broker/paper';
-import { alpacaBrokerClient } from '@/lib/broker/alpaca';
+import { alpacaBrokerClient, buildPortfolioFromAlpaca } from '@/lib/broker/alpaca';
 import { dbPersistence, generateDecisionId } from '@/lib/db/schema';
 import { tradingBotEngine, BotState, BotConfig } from '@/lib/bot/engine';
+import { applySettings, getStartingBalance, loadSettings } from '@/lib/settings';
 
 import { DashboardView } from '@/components/DashboardView';
 import { TerminalView } from '@/components/TerminalView';
@@ -60,7 +61,13 @@ export default function Home() {
 
   // ── Bot Sync Subscription ──────────────────────────────────────────────────
   useEffect(() => {
-    tradingBotEngine.onStateUpdate((s) => setBotState(s));
+    tradingBotEngine.onStateUpdate((s) => {
+      setBotState(s);
+      if (s.status === 'RUNNING' || s.status === 'PAUSED') {
+        if (s.currentDecision) setDecision(s.currentDecision);
+        if (s.currentRiskCheck) setRiskCheck(s.currentRiskCheck);
+      }
+    });
     tradingBotEngine.onExitRequest((req) => {
       showNotification(`⚠️ Bot Alert: ${req.reason}`);
     });
@@ -73,11 +80,12 @@ export default function Home() {
     const alpacaKey = localStorage.getItem('aitrader_alpaca_api_key');
     const alpacaSecret = localStorage.getItem('aitrader_alpaca_secret_key');
     const savedMode = localStorage.getItem('aitrader_app_mode') as AppMode ?? 'PAPER';
-    const startingBalance = parseFloat(localStorage.getItem('aitrader_starting_balance') ?? '10000');
+    const startingBalance = getStartingBalance();
 
     setAppMode(savedMode);
     marketEngine.setMode(savedMode);
     paperBroker.setStartingBalance(startingBalance);
+    applySettings(loadSettings());
 
     if (alpacaKey && alpacaSecret) {
       alpacaBrokerClient.setCredentials({ apiKeyId: alpacaKey, secretKey: alpacaSecret, isPaper: true });
@@ -100,79 +108,70 @@ export default function Home() {
 
     try {
       const sym = activeSymbolRef.current;
+      const botActive = tradingBotEngine.isRunning();
 
-      // 1. Fetch real market data (Binance → Alpaca → STALE)
       const currentSnap = await marketEngine.tick(sym);
       setSnapshot(currentSnap);
 
-      // 2. Features (standard formulas)
-      const feat = featureEngine.calculateFeatures(currentSnap);
-      setFeatures(feat);
+      let feat = features;
+      let llmDec = decision;
 
-      // 3. Agents (with evidence, honest MacroAgent)
-      const { signals: agentSigs, regime } = specialistAgentSystem.evaluateAllAgents(currentSnap, feat);
-      setSignals(agentSigs);
+      if (!botActive) {
+        feat = featureEngine.calculateFeatures(currentSnap);
+        setFeatures(feat);
 
-      // 4. Signal Fusion (conflict detection)
-      const fusionRes = signalFusionEngine.fuseSignals(agentSigs, regime);
-      setFusion(fusionRes);
+        const { signals: agentSigs, regime } = specialistAgentSystem.evaluateAllAgents(currentSnap, feat);
+        setSignals(agentSigs);
 
-      // 5. LLM Decision (advisory; fail-closed on stale)
-      const decId = generateDecisionId();
-      const llmDec = await aiProviderManager.generateStructuredDecision(currentSnap, feat, agentSigs, fusionRes, regime);
-      llmDec.decisionId = decId;
-      setDecision(llmDec);
+        const fusionRes = signalFusionEngine.fuseSignals(agentSigs, regime);
+        setFusion(fusionRes);
 
-      // Persist decision log
-      dbPersistence.saveDecisionLog(sym, currentSnap.price, llmDec);
+        const decId = generateDecisionId();
+        llmDec = await aiProviderManager.generateStructuredDecision(currentSnap, feat, agentSigs, fusionRes, regime);
+        llmDec.decisionId = decId;
+        setDecision(llmDec);
 
-      // 6. Portfolio sync
+        dbPersistence.saveDecisionLog(sym, currentSnap.price, llmDec);
+      }
+
+      const activeFeat = feat ?? featureEngine.calculateFeatures(currentSnap);
+      const initialBalance = getStartingBalance();
       let port: PortfolioState;
+
       if (alpacaBrokerClient.hasCredentials()) {
         try {
           const acc = await alpacaBrokerClient.getAccount();
           const alpacaPositions = await alpacaBrokerClient.getPositions();
+          const alpacaOrders = await alpacaBrokerClient.getOrders();
+          const alpacaTrades = await alpacaBrokerClient.getTradeHistory();
+
           setPositions(alpacaPositions);
-          port = {
-            balance: acc.balance,
-            initialBalance: parseFloat(localStorage.getItem('aitrader_starting_balance') ?? '100000'),
-            equity: acc.equity,
-            marginUsed: 0,
-            freeMargin: acc.buyingPower,
-            unrealizedPnL: alpacaPositions.reduce((s: number, p: Position) => s + p.unrealizedPnL, 0),
-            totalPnL: acc.equity - parseFloat(localStorage.getItem('aitrader_starting_balance') ?? '100000'),
-            totalPnLPercent: 0,
-            dailyPnL: 0,
-            dailyDrawdownPercent: 0,
-            maxDrawdownPercent: 0,
-            totalFees: 0,
-            winRate: 0,
-            profitFactor: 0,
-            sharpeRatio: 0,
-            totalTrades: 0,
-            winningTrades: 0,
-            losingTrades: 0,
-            equityCurve: [],
-          };
-        } catch {
-          // Alpaca API failed — fall back to paper broker
+          setOrders(alpacaOrders);
+          setTradeHistory(alpacaTrades);
+
+          port = buildPortfolioFromAlpaca(acc, alpacaPositions, initialBalance, alpacaTrades);
+          dbPersistence.syncPositions(alpacaPositions);
+        } catch (alpacaErr) {
+          console.warn('Alpaca market sync error, fallback to paper broker:', alpacaErr);
           paperBroker.updatePrices({ [sym]: currentSnap.price } as Record<SymbolId, number>);
           port = paperBroker.getPortfolioState(currentSnap.price);
           setPositions(paperBroker.getPositions());
+          setOrders(paperBroker.getOrders());
+          setTradeHistory(paperBroker.getTradeHistory());
         }
       } else {
         paperBroker.updatePrices({ [sym]: currentSnap.price } as Record<SymbolId, number>);
         port = paperBroker.getPortfolioState(currentSnap.price);
         setPositions(paperBroker.getPositions());
+        setOrders(paperBroker.getOrders());
+        setTradeHistory(paperBroker.getTradeHistory());
+        dbPersistence.syncPositions(paperBroker.getPositions());
       }
 
       setPortfolio(port);
-      setOrders(paperBroker.getOrders());
-      setTradeHistory(paperBroker.getTradeHistory());
 
-      // 7. Risk check (final authority)
-      if (llmDec && port) {
-        const riskRes = deterministicRiskEngine.evaluate(llmDec, port, currentSnap, feat);
+      if (!botActive && llmDec && port) {
+        const riskRes = deterministicRiskEngine.evaluate(llmDec, port, currentSnap, activeFeat);
         setRiskCheck(riskRes);
       }
 
@@ -181,7 +180,7 @@ export default function Home() {
     } finally {
       setIsUpdating(false);
     }
-  }, [isUpdating]);
+  }, [isUpdating, features, decision]);
 
   useEffect(() => {
     updateMarket();
@@ -216,14 +215,25 @@ export default function Home() {
     await updateMarket();
   };
 
-  const handleExecuteManualTrade = async (side: 'BUY' | 'SELL', size: number) => {
+  const handleExecuteManualTrade = async (
+    side: 'BUY' | 'SELL',
+    size: number,
+    type: 'MARKET' | 'LIMIT' = 'MARKET',
+    limitPrice?: number
+  ) => {
     if (!snapshot) return;
     const sym = activeSymbol;
     const stopLoss = side === 'BUY' ? snapshot.price * 0.985 : snapshot.price * 1.015;
     const takeProfit = side === 'BUY' ? snapshot.price * 1.035 : snapshot.price * 0.965;
 
     if (alpacaBrokerClient.hasCredentials()) {
-      const result = await alpacaBrokerClient.submitOrder(sym, size, side === 'BUY' ? 'buy' : 'sell', 'market');
+      const result = await alpacaBrokerClient.submitOrder(
+        sym,
+        size,
+        side === 'BUY' ? 'buy' : 'sell',
+        type.toLowerCase() === 'limit' ? 'limit' : 'market',
+        limitPrice
+      );
       showNotification(result.success ? `Alpaca: ${result.message}` : `Alpaca Error: ${result.message}`);
     } else {
       const result = paperBroker.submitOrder(sym, side, size, snapshot.price, stopLoss, takeProfit, 'MANUAL');
@@ -232,12 +242,35 @@ export default function Home() {
     await updateMarket();
   };
 
+  const handleCancelOrder = async (orderId: string) => {
+    if (alpacaBrokerClient.hasCredentials()) {
+      const res = await alpacaBrokerClient.cancelOrder(orderId);
+      showNotification(res.success ? `Alpaca: ${res.message}` : `Alpaca Error: ${res.message}`);
+    } else {
+      const res = paperBroker.cancelOrder(orderId);
+      showNotification(res ? `Cancelled order ${orderId}` : `Could not cancel order`);
+    }
+    await updateMarket();
+  };
+
   const handleClosePosition = async (positionId: string) => {
     if (!snapshot) return;
+    const pos = positions.find((p) => p.id === positionId);
     if (alpacaBrokerClient.hasCredentials()) {
-      await alpacaBrokerClient.closePosition(positionId);
+      if (!pos) {
+        showNotification('Error: position not found');
+        return;
+      }
+      try {
+        await alpacaBrokerClient.closePosition(pos.symbol);
+        showNotification(`Closed ${pos.symbol} position on Alpaca`);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        showNotification(`Alpaca Error: ${message}`);
+      }
     } else {
-      paperBroker.closePosition(positionId, snapshot.price, 'MANUAL');
+      const result = paperBroker.closePosition(positionId, snapshot.price, 'MANUAL');
+      showNotification(result.success ? `Closed position (PnL: $${result.pnl?.toFixed(2) ?? '0'})` : `Error: ${result.message}`);
     }
     await updateMarket();
   };
@@ -253,8 +286,8 @@ export default function Home() {
     showNotification(`⏹ Trading Bot stopped`);
   };
 
-  const handleConfirmBotExit = () => {
-    tradingBotEngine.confirmExit();
+  const handleConfirmBotExit = async () => {
+    await tradingBotEngine.confirmExit();
     showNotification(`✓ Bot exited market and closed positions`);
     updateMarket();
   };
@@ -397,6 +430,7 @@ export default function Home() {
             portfolio={portfolio}
             onExecuteManualTrade={handleExecuteManualTrade}
             onClosePosition={handleClosePosition}
+            onCancelOrder={handleCancelOrder}
             botState={botState}
             onSpawnBot={handleSpawnBot}
             onStopBot={handleStopBot}
@@ -429,6 +463,7 @@ export default function Home() {
             tradeHistory={tradeHistory}
             orders={orders}
             onClosePosition={handleClosePosition}
+            onCancelOrder={handleCancelOrder}
           />
         )}
 

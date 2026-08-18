@@ -25,8 +25,9 @@ export interface TerminalViewProps {
   decision: LLMDecision | null;
   positions: Position[];
   portfolio: PortfolioState | null;
-  onExecuteManualTrade: (side: 'BUY' | 'SELL', size: number) => void;
+  onExecuteManualTrade: (side: 'BUY' | 'SELL', size: number, type?: 'MARKET' | 'LIMIT', limitPrice?: number) => void;
   onClosePosition: (id: string) => void;
+  onCancelOrder?: (id: string) => void;
   // Bot Props
   botState: BotState;
   onSpawnBot: (config: BotConfig) => void;
@@ -54,6 +55,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   portfolio,
   onExecuteManualTrade,
   onClosePosition,
+  onCancelOrder,
   botState,
   onSpawnBot,
   onStopBot,
@@ -431,14 +433,14 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
             {/* Execute Button */}
             <button
-              onClick={() => onExecuteManualTrade(orderSide, orderSize)}
+              onClick={() => onExecuteManualTrade(orderSide, orderSize, orderType, orderType === 'LIMIT' ? limitPrice : undefined)}
               className={`w-full py-2.5 rounded-xl font-black text-xs transition-all shadow-md ${
                 orderSide === 'BUY'
                   ? 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-emerald-500/20'
                   : 'bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/20'
               }`}
             >
-              Submit {hasAlpaca ? 'Alpaca' : 'Paper'} {orderSide}
+              Submit {hasAlpaca ? 'Alpaca' : 'Paper'} {orderSide} ({orderType})
             </button>
           </div>
         </div>
@@ -578,6 +580,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                             <th className="pb-2">Size</th>
                             <th className="pb-2">Status</th>
                             <th className="pb-2">Source</th>
+                            <th className="pb-2 text-right">Action</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-800/50">
@@ -599,6 +602,16 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                                 </span>
                               </td>
                               <td className="py-2 text-[11px] text-gray-400">{ord.source}</td>
+                              <td className="py-2 text-right">
+                                {ord.status === 'PENDING' && onCancelOrder && (
+                                  <button
+                                    onClick={() => onCancelOrder(ord.id)}
+                                    className="px-2 py-0.5 rounded-lg bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500/30 font-bold text-[10px]"
+                                  >
+                                    Cancel
+                                  </button>
+                                )}
+                              </td>
                             </tr>
                           ))}
                         </tbody>

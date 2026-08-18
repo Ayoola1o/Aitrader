@@ -1,5 +1,5 @@
 import {
-  SymbolId, MarketSnapshot, LLMDecision, RiskCheckResult, PortfolioState,
+  SymbolId, MarketSnapshot, LLMDecision, RiskCheckResult, PortfolioState, TradeHistoryItem,
 } from '@/types/trading';
 import { marketEngine } from '@/lib/market/engine';
 import { featureEngine } from '@/lib/features/engine';
@@ -8,7 +8,7 @@ import { signalFusionEngine } from '@/lib/fusion/engine';
 import { aiProviderManager } from '@/lib/llm/providers';
 import { deterministicRiskEngine } from '@/lib/risk/engine';
 import { paperBroker } from '@/lib/broker/paper';
-import { alpacaBrokerClient } from '@/lib/broker/alpaca';
+import { alpacaBrokerClient, buildPortfolioFromAlpaca } from '@/lib/broker/alpaca';
 import { dbPersistence, generateDecisionId } from '@/lib/db/schema';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -81,6 +81,7 @@ export class TradingBotEngine {
   onStateUpdate(cb: (s: BotState) => void) { this.onStateUpdateCb = cb; }
   onExitRequest(cb: (r: BotExitRequest, s: BotState) => void) { this.onExitRequestCb = cb; }
   getState(): BotState { return { ...this.state, log: [...this.state.log] }; }
+  isRunning(): boolean { return this.state.status === 'RUNNING' || this.state.status === 'PAUSED'; }
 
   start(cfg: BotConfig) {
     if (this.state.status === 'RUNNING') return;
@@ -108,19 +109,31 @@ export class TradingBotEngine {
   }
 
   /** User confirmed exit — close all positions then stop */
-  confirmExit() {
+  async confirmExit() {
     this.clearTimer();
     this.state.status = 'STOPPING';
     this.log('ACTION', 'Closing all open positions…');
     this.push();
 
     const price = this.state.currentPrice;
-    const positions = paperBroker.getPositions();
-    for (const pos of positions) {
-      paperBroker.closePosition(pos.id, price || pos.currentPrice, 'MANUAL');
+    let closedCount = 0;
+
+    if (alpacaBrokerClient.hasCredentials()) {
+      try {
+        closedCount = await alpacaBrokerClient.closeAllPositions();
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.log('ERROR', `Alpaca close failed: ${message}`);
+      }
+    } else {
+      const positions = paperBroker.getPositions();
+      for (const pos of positions) {
+        paperBroker.closePosition(pos.id, price || pos.currentPrice, 'MANUAL');
+      }
+      closedCount = positions.length;
     }
 
-    this.log('INFO', `Closed ${positions.length} position(s). Bot shut down cleanly.`);
+    this.log('INFO', `Closed ${closedCount} position(s). Bot shut down cleanly.`);
     this.state.status = 'STOPPED';
     this.state.exitRequest = null;
     this.push();
@@ -207,7 +220,7 @@ export class TradingBotEngine {
       }
 
       // Update consecutive losses from history
-      this.updateLossCounter();
+      await this.updateLossCounter();
 
       // 8. Check exit conditions
       const exitReq = this.checkExitConditions(port, dec);
@@ -276,22 +289,26 @@ export class TradingBotEngine {
     if (alpacaBrokerClient.hasCredentials()) {
       try {
         const acc = await alpacaBrokerClient.getAccount();
-        return {
-          balance: acc.balance, initialBalance: this.initialEquity,
-          equity: acc.equity, marginUsed: 0, freeMargin: acc.buyingPower,
-          unrealizedPnL: 0, totalPnL: acc.equity - this.initialEquity,
-          totalPnLPercent: 0, dailyPnL: 0, dailyDrawdownPercent: 0,
-          maxDrawdownPercent: 0, totalFees: 0, winRate: 0, profitFactor: 0,
-          sharpeRatio: 0, totalTrades: 0, winningTrades: 0, losingTrades: 0, equityCurve: [],
-        };
+        const positions = await alpacaBrokerClient.getPositions();
+        const trades = await alpacaBrokerClient.getTradeHistory();
+        return buildPortfolioFromAlpaca(acc, positions, this.initialEquity, trades);
       } catch { /* fall through */ }
     }
     paperBroker.updatePrices({ [sym]: price } as Record<SymbolId, number>);
     return paperBroker.getPortfolioState(price);
   }
 
-  private updateLossCounter() {
-    const history = paperBroker.getTradeHistory();
+  private async updateLossCounter() {
+    let history: TradeHistoryItem[] = [];
+    if (alpacaBrokerClient.hasCredentials()) {
+      try {
+        history = await alpacaBrokerClient.getTradeHistory();
+      } catch {
+        history = paperBroker.getTradeHistory();
+      }
+    } else {
+      history = paperBroker.getTradeHistory();
+    }
     if (history.length === 0) return;
     let streak = 0;
     for (let i = history.length - 1; i >= 0; i--) {

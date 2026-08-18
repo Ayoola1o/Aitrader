@@ -6,6 +6,7 @@ interface RiskConfig {
   minRiskReward: number;
   maxSpreadPercent: number;
   newsKillSwitch: boolean;
+  minConfidence: number; // 0-1
 }
 
 const DEFAULT_RISK: RiskConfig = {
@@ -14,6 +15,7 @@ const DEFAULT_RISK: RiskConfig = {
   minRiskReward: 2.0,
   maxSpreadPercent: 0.3, // 0.3% max spread
   newsKillSwitch: false,
+  minConfidence: 0.68,
 };
 
 export class DeterministicRiskEngine {
@@ -65,9 +67,19 @@ export class DeterministicRiskEngine {
       failedGates.push('NO_STOP_LOSS: Trade requires a stop loss');
     }
 
-    // Gate 7: News kill switch
-    if (this.config.newsKillSwitch) {
-      warnings.push('NEWS_KILL_SWITCH: Active — verify no major macro release');
+    // Gate 7: News kill switch — blocks new entries when active
+    if (this.config.newsKillSwitch && (decision.action === 'BUY' || decision.action === 'SELL')) {
+      failedGates.push('NEWS_KILL_SWITCH: Trading paused for macro event window');
+    }
+
+    // Gate 7b: Minimum AI confidence
+    if (
+      (decision.action === 'BUY' || decision.action === 'SELL') &&
+      decision.confidence < this.config.minConfidence
+    ) {
+      failedGates.push(
+        `CONFIDENCE: ${(decision.confidence * 100).toFixed(0)}% below minimum ${(this.config.minConfidence * 100).toFixed(0)}%`
+      );
     }
 
     // Risk-based position sizing
@@ -107,6 +119,10 @@ export class DeterministicRiskEngine {
       newsKillSwitchActive: this.config.newsKillSwitch,
       dataQualityBlock,
     };
+  }
+
+  getConfig(): RiskConfig {
+    return { ...this.config };
   }
 }
 

@@ -11,6 +11,7 @@ interface PaperTradingViewProps {
   tradeHistory: TradeHistoryItem[];
   orders: Order[];
   onClosePosition: (id: string) => void;
+  onCancelOrder?: (id: string) => void;
 }
 
 function MetricCard({ label, value, sub, color = 'white', isUnavailable = false }: {
@@ -28,7 +29,7 @@ function MetricCard({ label, value, sub, color = 'white', isUnavailable = false 
 }
 
 export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
-  portfolio, positions, tradeHistory, orders, onClosePosition,
+  portfolio, positions, tradeHistory, orders, onClosePosition, onCancelOrder,
 }) => {
   const hasAlpaca = alpacaBrokerClient.hasCredentials();
   const hasRealTrades = tradeHistory.length >= 1;
@@ -204,6 +205,65 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
                       >
                         <X className="w-3 h-3" /> Close
                       </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Orders Section */}
+      <div className="glass-panel p-4 rounded-2xl border border-gray-800">
+        <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+          <TrendingUp className="w-4 h-4 text-emerald-400" />
+          Active & Recent Orders ({orders.length})
+        </h4>
+        {orders.length === 0 ? (
+          <p className="text-xs text-gray-500 py-4 text-center">No orders recorded</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-gray-400 border-b border-gray-800">
+                  <th className="pb-2 text-left">Symbol</th>
+                  <th className="pb-2 text-right">Side</th>
+                  <th className="pb-2 text-right">Type</th>
+                  <th className="pb-2 text-right">Price</th>
+                  <th className="pb-2 text-right">Size</th>
+                  <th className="pb-2 text-right">Status</th>
+                  <th className="pb-2 text-right">Source</th>
+                  <th className="pb-2 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {orders.map((ord) => (
+                  <tr key={ord.id} className="border-b border-gray-800/50 hover:bg-gray-800/20">
+                    <td className="py-2 font-bold text-white">{ord.symbol}</td>
+                    <td className={`py-2 text-right font-bold ${ord.side === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}`}>{ord.side}</td>
+                    <td className="py-2 text-right text-gray-300">{ord.type}</td>
+                    <td className="py-2 text-right text-gray-300">${ord.price}</td>
+                    <td className="py-2 text-right text-gray-300">{ord.size}</td>
+                    <td className="py-2 text-right">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                        ord.status === 'FILLED' ? 'bg-emerald-500/20 text-emerald-400' :
+                        ord.status === 'PENDING' ? 'bg-amber-500/20 text-amber-400' :
+                        'bg-gray-800 text-gray-400'
+                      }`}>
+                        {ord.status}
+                      </span>
+                    </td>
+                    <td className="py-2 text-right text-gray-400 text-[11px]">{ord.source}</td>
+                    <td className="py-2 text-right">
+                      {ord.status === 'PENDING' && onCancelOrder && (
+                        <button
+                          onClick={() => onCancelOrder(ord.id)}
+                          className="px-2 py-0.5 bg-rose-500/20 border border-rose-500/40 text-rose-400 rounded-lg text-[10px] font-bold hover:bg-rose-500/30"
+                        >
+                          Cancel
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

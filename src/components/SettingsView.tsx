@@ -7,8 +7,8 @@ import { dbPersistence } from '@/lib/db/schema';
 import { paperBroker } from '@/lib/broker/paper';
 import { alpacaBrokerClient } from '@/lib/broker/alpaca';
 import { AppMode } from '@/types/trading';
-import { deterministicRiskEngine } from '@/lib/risk/engine';
 import { supabaseManager } from '@/lib/db/supabase';
+import { applySettings, loadSettings, saveSettings, DEFAULT_SETTINGS } from '@/lib/settings';
 
 interface SettingsViewProps {
   onModeChange?: (mode: AppMode) => void;
@@ -17,17 +17,12 @@ interface SettingsViewProps {
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCredentialsChange }) => {
   const [tradingMode, setTradingMode] = useState<'PAPER' | 'SHADOW' | 'LIVE'>('PAPER');
-  const [maxRisk, setMaxRisk] = useState<number>(0.5);
-  const [maxDrawdown, setMaxDrawdown] = useState<number>(5.0);
-  const [minRR, setMinRR] = useState<number>(2.0);
-  const [killSwitch, setKillSwitch] = useState<boolean>(false);
-  const [confidenceThreshold, setConfidenceThreshold] = useState<number>(68);
-  const [startingBalance, setStartingBalance] = useState<number>(() => {
-    if (typeof window !== 'undefined') {
-      return parseFloat(localStorage.getItem('aitrader_starting_balance') ?? '10000');
-    }
-    return 10000;
-  });
+  const [maxRisk, setMaxRisk] = useState<number>(DEFAULT_SETTINGS.maxRisk);
+  const [maxDrawdown, setMaxDrawdown] = useState<number>(DEFAULT_SETTINGS.maxDrawdown);
+  const [minRR, setMinRR] = useState<number>(DEFAULT_SETTINGS.minRR);
+  const [killSwitch, setKillSwitch] = useState<boolean>(DEFAULT_SETTINGS.killSwitch);
+  const [confidenceThreshold, setConfidenceThreshold] = useState<number>(DEFAULT_SETTINGS.confidenceThreshold);
+  const [startingBalance, setStartingBalance] = useState<number>(DEFAULT_SETTINGS.startingBalance);
 
   // Alpaca API Credentials
   const [alpacaApiKey, setAlpacaApiKey] = useState<string>(() => {
@@ -87,6 +82,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCred
 
   // Initial connection test on mount if keys exist
   useEffect(() => {
+    const saved = loadSettings();
+    setMaxRisk(saved.maxRisk);
+    setMaxDrawdown(saved.maxDrawdown);
+    setMinRR(saved.minRR);
+    setKillSwitch(saved.killSwitch);
+    setConfidenceThreshold(saved.confidenceThreshold);
+    setStartingBalance(saved.startingBalance);
+    applySettings(saved);
+
     if (alpacaApiKey && alpacaSecretKey) {
       alpacaBrokerClient.setCredentials({
         apiKeyId: alpacaApiKey,
@@ -131,12 +135,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCred
     });
 
     // Update risk engine config
-    deterministicRiskEngine.setConfig({
-      maxPositionRiskPercent: maxRisk,
-      maxDailyDrawdownPercent: maxDrawdown,
-      minRiskReward: minRR,
-      newsKillSwitch: killSwitch,
-    });
+    const settings = {
+      maxRisk,
+      maxDrawdown,
+      minRR,
+      killSwitch,
+      confidenceThreshold,
+      startingBalance,
+    };
+    saveSettings(settings);
+    applySettings(settings);
 
     // Configure paper broker starting balance
     paperBroker.setStartingBalance(startingBalance);
@@ -151,7 +159,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onModeChange, onCred
 
       try {
         const acc = await alpacaBrokerClient.getAccount();
-        setAlpacaStatus(`Connected & Saved! Equity: $${(Number(acc?.equity) || 0).toLocaleString()}`);
+        setAlpacaStatus(`Connected & Saved! Equity: $${acc.equity.toLocaleString()}`);
         setUseAlpacaBroker(true);
       } catch (e: any) {
         setAlpacaStatus(`Saved to browser, Alpaca status: ${e.message}`);
