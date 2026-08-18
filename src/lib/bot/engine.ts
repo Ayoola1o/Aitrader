@@ -83,6 +83,33 @@ export class TradingBotEngine {
   getState(): BotState { return { ...this.state, log: [...this.state.log] }; }
   isRunning(): boolean { return this.state.status === 'RUNNING' || this.state.status === 'PAUSED'; }
 
+  async syncWithCloud() {
+    if (typeof window === 'undefined') return;
+    try {
+      const res = await fetch('/api/bot/state', { cache: 'no-store' });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.success && d.bot) {
+          const cloudBot = d.bot;
+          if (cloudBot.status === 'RUNNING') {
+            this.state.status = 'RUNNING';
+            this.state.symbol = cloudBot.symbol;
+            this.state.allocatedCapital = cloudBot.allocatedCapital;
+            this.state.cycleCount = cloudBot.cycleCount;
+            this.state.tradesExecuted = cloudBot.tradesExecuted;
+            this.state.runningPnL = cloudBot.runningPnL;
+            this.state.lastAction = cloudBot.lastAction;
+            this.state.lastDecisionAction = cloudBot.lastDecisionAction;
+            if (Array.isArray(cloudBot.log) && cloudBot.log.length > 0) {
+              this.state.log = cloudBot.log;
+            }
+            this.push();
+          }
+        }
+      }
+    } catch {}
+  }
+
   start(cfg: BotConfig) {
     if (this.state.status === 'RUNNING') return;
     this.config = cfg;
@@ -95,9 +122,17 @@ export class TradingBotEngine {
       allocatedCapital: cfg.allocatedCapital,
       startedAt: Date.now(),
     };
-    this.log('INFO', `Bot spawned on ${cfg.symbol} with $${cfg.allocatedCapital.toLocaleString()} capital — cycle every ${cfg.cycleIntervalSeconds}s`);
+    this.log('INFO', `Bot spawned on ${cfg.symbol} with $${cfg.allocatedCapital.toLocaleString()} capital — cycle every ${cfg.cycleIntervalSeconds}s (Cloud 24/7 Active)`);
     this.push();
     this.scheduleCycle(0); // run immediately
+
+    if (typeof window !== 'undefined') {
+      fetch('/api/bot/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'START', config: cfg }),
+      }).catch(() => {});
+    }
   }
 
   stop() {
@@ -106,6 +141,14 @@ export class TradingBotEngine {
     this.state.status = 'STOPPED';
     this.log('WARN', 'Bot stopped by user command.');
     this.push();
+
+    if (typeof window !== 'undefined') {
+      fetch('/api/bot/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'STOP' }),
+      }).catch(() => {});
+    }
   }
 
   /** User confirmed exit — close all positions then stop */
@@ -137,6 +180,14 @@ export class TradingBotEngine {
     this.state.status = 'STOPPED';
     this.state.exitRequest = null;
     this.push();
+
+    if (typeof window !== 'undefined') {
+      fetch('/api/bot/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'STOP' }),
+      }).catch(() => {});
+    }
   }
 
   /** User chose to keep the bot running after an exit request */

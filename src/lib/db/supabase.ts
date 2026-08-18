@@ -5,6 +5,26 @@ export interface SupabaseConfig {
   anonKey: string;
 }
 
+export interface BotSessionRecord {
+  id?: number;
+  session_id: string;
+  symbol: string;
+  allocated_capital: number;
+  cycle_interval_seconds: number;
+  cycles_completed: number;
+  trades_executed: number;
+  final_pnl: number;
+  status: 'RUNNING' | 'PAUSED' | 'STOPPED' | 'IDLE';
+  last_action?: string;
+  last_decision_action?: string;
+  consecutive_no_trades?: number;
+  consecutive_losses?: number;
+  current_price?: number;
+  logs?: Array<{ id: number; time: number; level: string; message: string }>;
+  started_at?: string;
+  stopped_at?: string;
+}
+
 class SupabaseManager {
   private client: SupabaseClient | null = null;
   private config: SupabaseConfig | null = null;
@@ -14,20 +34,25 @@ class SupabaseManager {
   }
 
   private init() {
-    if (typeof window !== 'undefined') {
-      const url = localStorage.getItem('aitrader_supabase_url') || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-      const anonKey = localStorage.getItem('aitrader_supabase_anon_key') || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    let url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    let anonKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-      if (url && anonKey) {
-        try {
-          this.config = { url, anonKey };
-          this.client = createClient(url, anonKey, {
-            auth: { persistSession: false },
-          });
-        } catch (err) {
-          console.warn('[SupabaseManager] Initialization error:', err);
-          this.client = null;
-        }
+    if (typeof window !== 'undefined') {
+      const storedUrl = localStorage.getItem('aitrader_supabase_url');
+      const storedKey = localStorage.getItem('aitrader_supabase_anon_key');
+      if (storedUrl) url = storedUrl;
+      if (storedKey) anonKey = storedKey;
+    }
+
+    if (url && anonKey) {
+      try {
+        this.config = { url, anonKey };
+        this.client = createClient(url, anonKey, {
+          auth: { persistSession: false },
+        });
+      } catch (err) {
+        console.warn('[SupabaseManager] Initialization error:', err);
+        this.client = null;
       }
     }
   }
@@ -61,7 +86,7 @@ class SupabaseManager {
   }
 
   getClient(): SupabaseClient | null {
-    if (!this.client && typeof window !== 'undefined') {
+    if (!this.client) {
       this.init();
     }
     return this.client;
@@ -89,8 +114,41 @@ class SupabaseManager {
         return { success: false, message: `Database error: ${error.message}` };
       }
       return { success: true, message: '✓ Successfully connected to Supabase PostgreSQL database.' };
-    } catch (err: any) {
-      return { success: false, message: `Connection failed: ${err?.message || String(err)}` };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { success: false, message: `Connection failed: ${message}` };
+    }
+  }
+
+  // ── Bot State Cloud Persistence ───────────────────────────────────────────────
+  async getActiveBotSession(): Promise<BotSessionRecord | null> {
+    const client = this.getClient();
+    if (!client) return null;
+    try {
+      const { data, error } = await client
+        .from('bot_sessions')
+        .select('*')
+        .order('id', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error || !data) return null;
+      return data as BotSessionRecord;
+    } catch {
+      return null;
+    }
+  }
+
+  async saveBotSession(session: Partial<BotSessionRecord> & { session_id: string }): Promise<boolean> {
+    const client = this.getClient();
+    if (!client) return false;
+    try {
+      const { error } = await client
+        .from('bot_sessions')
+        .upsert(session, { onConflict: 'session_id' });
+      return !error;
+    } catch {
+      return false;
     }
   }
 }

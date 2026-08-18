@@ -25,6 +25,7 @@ import { FooterStatusBar } from '@/components/layout/FooterStatusBar';
 import { DashboardView } from '@/components/DashboardView';
 import { TerminalView } from '@/components/TerminalView';
 import { StrategyView } from '@/components/StrategyView';
+import { BacktestingView } from '@/components/BacktestingView';
 import { AlertsView } from '@/components/AlertsView';
 import { AIDecisionCenterView } from '@/components/AIDecisionCenterView';
 import { PaperTradingView } from '@/components/PaperTradingView';
@@ -91,6 +92,9 @@ export default function Home() {
       alpacaBrokerClient.setCredentials({ apiKeyId: alpacaKey, secretKey: alpacaSecret, isPaper: true });
       marketEngine.setAlpacaCredentials(alpacaKey, alpacaSecret);
     }
+
+    // Sync active cloud bot from Supabase if running
+    tradingBotEngine.syncWithCloud();
   }, []);
 
   // ── Sync appMode to engine ─────────────────────────────────────────────────
@@ -439,6 +443,8 @@ export default function Home() {
             />
           )}
 
+          {activeTab === 'backtesting' && <BacktestingView />}
+
           {activeTab === 'alerts' && <AlertsView />}
 
           {activeTab === 'settings' && (
@@ -446,7 +452,7 @@ export default function Home() {
           )}
 
           {/* Placeholder for remaining modular tabs */}
-          {['markets', 'backtesting', 'reports', 'journal', 'data_lab'].includes(activeTab) && (
+          {['markets', 'reports', 'journal', 'data_lab'].includes(activeTab) && (
             <div className="bg-[#0B111E] border border-[#1E293B] rounded-2xl p-12 text-center my-8">
               <h2 className="text-xl font-black text-white">{title}</h2>
               <p className="text-sm text-gray-400 mt-2">{subtitle}</p>
