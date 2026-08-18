@@ -27,7 +27,10 @@ import { TerminalView } from '@/components/TerminalView';
 import { StrategyView } from '@/components/StrategyView';
 import { BacktestingView } from '@/components/BacktestingView';
 import { AlertsView } from '@/components/AlertsView';
-import { AIDecisionCenterView } from '@/components/AIDecisionCenterView';
+import { MarketsScannerView } from '@/components/MarketsScannerView';
+import { ReportsAttributionView } from '@/components/ReportsAttributionView';
+import { TradingJournalView } from '@/components/TradingJournalView';
+import { DataLabTelemetryView } from '@/components/DataLabTelemetryView';
 import { PaperTradingView } from '@/components/PaperTradingView';
 import { ReplayResearchView } from '@/components/ReplayResearchView';
 import { SettingsView } from '@/components/SettingsView';
@@ -437,10 +440,54 @@ export default function Home() {
 
           {activeTab === 'strategies' && (
             <StrategyView
+              snapshot={snapshot ?? undefined}
+              portfolio={portfolio}
+              positions={positions}
+              tradeHistory={tradeHistory}
+              activeSymbol={activeSymbol}
+              onSelectSymbol={(sym) => {
+                setActiveSymbol(sym);
+                activeSymbolRef.current = sym;
+              }}
               onNavigateDashboard={() => setActiveTab('dashboard')}
               onNavigateTerminal={() => setActiveTab('terminal')}
               onNavigateSettings={() => setActiveTab('settings')}
             />
+          )}
+
+          {activeTab === 'markets' && (
+            <MarketsScannerView
+              snapshot={snapshot ?? undefined}
+              onSelectSymbol={(sym) => {
+                setActiveSymbol(sym);
+                activeSymbolRef.current = sym;
+              }}
+              onNavigateTerminal={() => setActiveTab('terminal')}
+              onSpawnBot={(sym) => {
+                setActiveSymbol(sym);
+                activeSymbolRef.current = sym;
+                setActiveTab('strategies');
+              }}
+            />
+          )}
+
+          {activeTab === 'reports' && (
+            <ReportsAttributionView portfolio={portfolio} tradeHistory={tradeHistory} />
+          )}
+
+          {activeTab === 'journal' && (
+            <TradingJournalView
+              tradeHistory={tradeHistory}
+              onSelectSymbol={(sym) => {
+                setActiveSymbol(sym);
+                activeSymbolRef.current = sym;
+              }}
+              onNavigateTerminal={() => setActiveTab('terminal')}
+            />
+          )}
+
+          {activeTab === 'data_lab' && (
+            <DataLabTelemetryView snapshot={snapshot ?? undefined} />
           )}
 
           {activeTab === 'backtesting' && <BacktestingView />}
@@ -449,28 +496,6 @@ export default function Home() {
 
           {activeTab === 'settings' && (
             <SettingsView onModeChange={(mode) => setAppMode(mode)} onCredentialsChange={() => updateMarket()} />
-          )}
-
-          {/* Placeholder for remaining modular tabs */}
-          {['markets', 'reports', 'journal', 'data_lab'].includes(activeTab) && (
-            <div className="bg-[#0B111E] border border-[#1E293B] rounded-2xl p-12 text-center my-8">
-              <h2 className="text-xl font-black text-white">{title}</h2>
-              <p className="text-sm text-gray-400 mt-2">{subtitle}</p>
-              <div className="mt-6 flex justify-center gap-3">
-                <button
-                  onClick={() => setActiveTab('dashboard')}
-                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs"
-                >
-                  Return to Dashboard
-                </button>
-                <button
-                  onClick={() => setActiveTab('terminal')}
-                  className="px-4 py-2 rounded-xl bg-[#0E1726] border border-gray-700 hover:border-gray-500 text-gray-200 font-bold text-xs"
-                >
-                  Open Terminal
-                </button>
-              </div>
-            </div>
           )}
         </main>
 
