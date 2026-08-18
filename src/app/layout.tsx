@@ -4,6 +4,11 @@ import type { Metadata } from 'next';
 export const metadata: Metadata = {
   title: 'AI Quant Trader Lite — Evidence-Based Market Decision Engine',
   description: 'Lightweight AI-assisted quantitative trading and paper-trading engine designed for Vercel deployment (<500 MB footprint target).',
+  icons: {
+    icon: '/favico.png',
+    shortcut: '/favico.png',
+    apple: '/favico.png',
+  },
 };
 
 export default function RootLayout({
