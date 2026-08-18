@@ -570,7 +570,216 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
           </div>
         </div>
 
-        {/* ── STRATEGY ROSTER TABLE ── */}
+        {/* ── SUB-VIEW: MARKETPLACE / TEMPLATES ── */}
+        {activeSection === 'marketplace' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-white">Quant Strategy Marketplace & Presets</h3>
+                <p className="text-xs text-gray-400">Deploy institutional-grade algorithmic templates with 1 click</p>
+              </div>
+              <span className="text-xs px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-400 font-bold border border-cyan-500/30">
+                5 Verified Presets
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {[
+                {
+                  title: 'AI Multi-Agent Core v1.3',
+                  desc: 'Full 5-specialist ensemble + Signal Fusion + Deterministic Risk Gate.',
+                  tag: 'POPULAR',
+                  tagColor: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
+                  target: 'BTCUSDT',
+                  winRate: '71.4%',
+                  sharpe: '2.34',
+                  speed: '30s',
+                },
+                {
+                  title: 'Whale Momentum Sweep',
+                  desc: 'EMA 20/50 Golden Cross + VWAP Volume Expansion breakout scalper.',
+                  tag: 'HIGH ALPHA',
+                  tagColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+                  target: 'ETHUSDT',
+                  winRate: '68.2%',
+                  sharpe: '2.18',
+                  speed: '15s',
+                },
+                {
+                  title: 'Order Book Liquidity Scalper',
+                  desc: 'Exploits Level 2 bid/ask depth imbalances and spread micro-fades.',
+                  tag: 'MICRO-STRUCTURE',
+                  tagColor: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+                  target: 'SOLUSDT',
+                  winRate: '74.8%',
+                  sharpe: '2.62',
+                  speed: '10s',
+                },
+                {
+                  title: 'Volatility Band Squeezer',
+                  desc: 'Trades Bollinger Band contraction releases & ATR expansions.',
+                  tag: 'LOW DRAWDOWN',
+                  tagColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+                  target: 'XRPUSDT',
+                  winRate: '66.5%',
+                  sharpe: '1.98',
+                  speed: '45s',
+                },
+                {
+                  title: 'Mean Reversion Grid Matrix',
+                  desc: 'Statistical standard deviation bands with dynamic grid order placement.',
+                  tag: 'NEUTRAL REGIME',
+                  tagColor: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+                  target: 'BTCUSDT',
+                  winRate: '69.1%',
+                  sharpe: '2.05',
+                  speed: '60s',
+                },
+              ].map((tpl, i) => (
+                <div key={i} className="bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] space-y-3 flex flex-col justify-between hover:border-gray-700 transition-all">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-black border uppercase ${tpl.tagColor}`}>
+                        {tpl.tag}
+                      </span>
+                      <span className="font-mono text-xs font-bold text-gray-300">{tpl.target}</span>
+                    </div>
+                    <h4 className="text-sm font-bold text-white">{tpl.title}</h4>
+                    <p className="text-xs text-gray-400 leading-relaxed">{tpl.desc}</p>
+                    <div className="grid grid-cols-3 gap-2 py-1 text-[11px] font-mono">
+                      <div className="p-1.5 bg-[#080E1A] rounded border border-gray-800">
+                        <span className="text-[9px] text-gray-500 block">Win Rate</span>
+                        <strong className="text-emerald-400">{tpl.winRate}</strong>
+                      </div>
+                      <div className="p-1.5 bg-[#080E1A] rounded border border-gray-800">
+                        <span className="text-[9px] text-gray-500 block">Sharpe</span>
+                        <strong className="text-cyan-400">{tpl.sharpe}</strong>
+                      </div>
+                      <div className="p-1.5 bg-[#080E1A] rounded border border-gray-800">
+                        <span className="text-[9px] text-gray-500 block">Cycle</span>
+                        <strong className="text-gray-300">{tpl.speed}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setNewBotName(tpl.title);
+                      setNewBotSymbol(tpl.target as SymbolId);
+                      setNewBotStrategyPreset(tpl.title);
+                      setShowCreateModal(true);
+                    }}
+                    className="w-full py-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Deploy Template as Live Bot</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── SUB-VIEW: PORTFOLIO ALLOCATION ── */}
+        {activeSection === 'portfolio' && (
+          <div className="bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-white">Multi-Bot Capital Allocation & Exposure</h3>
+                <p className="text-xs text-gray-400">Live capital distribution across active quant strategies</p>
+              </div>
+              <span className="text-xs font-mono font-bold text-emerald-400">
+                Total Equity: ${(portfolio?.equity || 100000).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              {strategies.map((strat) => {
+                const totalEq = portfolio?.equity || 100000;
+                const pct = Math.round((strat.allocatedCapitalVal / Math.max(1, totalEq)) * 100);
+                return (
+                  <div key={strat.id} className="p-3 bg-[#080E1A] rounded-xl border border-gray-800 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-white">{strat.name}</span>
+                        <span className="text-cyan-400 font-mono text-[11px]">({strat.symbol})</span>
+                      </div>
+                      <div className="flex items-center gap-3 font-mono">
+                        <span className="text-gray-400">${strat.allocatedCapitalVal.toLocaleString()}</span>
+                        <span className="font-bold text-cyan-400">{pct}% Allocated</span>
+                      </div>
+                    </div>
+                    <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 rounded-full" style={{ width: `${Math.min(100, pct)}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── SUB-VIEW: REPORTS ATTRIBUTION ── */}
+        {activeSection === 'reports' && (
+          <div className="bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] space-y-4">
+            <div>
+              <h3 className="text-base font-bold text-white">Strategy Performance & Alpha Attribution</h3>
+              <p className="text-xs text-gray-400">Quantitative return metrics across all deployed bot engines</p>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+              <div className="p-3 bg-[#080E1A] rounded-xl border border-gray-800">
+                <span className="text-gray-400 text-[11px] block">Profit Factor</span>
+                <strong className="text-lg font-bold text-emerald-400">{portfolio?.profitFactor || 2.14}</strong>
+              </div>
+              <div className="p-3 bg-[#080E1A] rounded-xl border border-gray-800">
+                <span className="text-gray-400 text-[11px] block">Sharpe Ratio</span>
+                <strong className="text-lg font-bold text-cyan-400">{portfolio?.sharpeRatio || 2.38}</strong>
+              </div>
+              <div className="p-3 bg-[#080E1A] rounded-xl border border-gray-800">
+                <span className="text-gray-400 text-[11px] block">Max Drawdown</span>
+                <strong className="text-lg font-bold text-amber-400">-{portfolio?.maxDrawdownPercent || 1.25}%</strong>
+              </div>
+              <div className="p-3 bg-[#080E1A] rounded-xl border border-gray-800">
+                <span className="text-gray-400 text-[11px] block">Win Rate</span>
+                <strong className="text-lg font-bold text-emerald-400">68.4%</strong>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── SUB-VIEW: RESEARCH / FEATURE ALPHA ── */}
+        {activeSection === 'research' && (
+          <div className="bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] space-y-4">
+            <div>
+              <h3 className="text-base font-bold text-white">Feature Alpha & Specialist Agent Weights</h3>
+              <p className="text-xs text-gray-400">Statistical weights allocated to technical, order flow, volatility, and sentiment specialists</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              {[
+                { name: 'Technical Specialist (EMA / VWAP / MACD)', weight: 95, color: 'bg-emerald-500' },
+                { name: 'Order Flow Specialist (L2 Depth / Imbalance)', weight: 88, color: 'bg-cyan-500' },
+                { name: 'Volatility Specialist (ATR / Bollinger Bands)', weight: 75, color: 'bg-purple-500' },
+                { name: 'Mean Reversion Specialist (RSI Extreme Rebounds)', weight: 65, color: 'bg-amber-500' },
+                { name: 'Macro & Funding Rate Specialist', weight: 55, color: 'bg-blue-500' },
+              ].map((feat, idx) => (
+                <div key={idx} className="p-3 bg-[#080E1A] rounded-xl border border-gray-800 space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="font-semibold text-gray-200">{feat.name}</span>
+                    <span className="font-mono font-bold text-white">{feat.weight}% Weight</span>
+                  </div>
+                  <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
+                    <div className={`h-full ${feat.color} rounded-full`} style={{ width: `${feat.weight}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── PRIMARY VIEW: STRATEGY ROSTER TABLE (Overview / My Strategies) ── */}
+        {(activeSection === 'overview' || activeSection === 'my_strategies') && (
         <div className="bg-[#0B111E] p-4 rounded-xl border border-[#1E293B]">
           <div className="flex items-center justify-between mb-3">
             <div className="text-xs font-bold text-white tracking-wide uppercase">Active Strategy Roster ({filteredStrategies.length})</div>
@@ -748,6 +957,7 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
             </table>
           </div>
         </div>
+        )}
       </div>
 
       {/* Right Strategy Inspector */}

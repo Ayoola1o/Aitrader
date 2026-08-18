@@ -43,7 +43,16 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<NavTabId>('dashboard');
   const [activeSymbol, setActiveSymbol] = useState<SymbolId>('BTCUSDT');
   const [appMode, setAppMode] = useState<AppMode>('PAPER');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const handleToggleSidebar = () => {
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      setIsMobileMenuOpen((prev) => !prev);
+    } else {
+      setIsSidebarCollapsed((prev) => !prev);
+    }
+  };
 
   const [snapshot, setSnapshot] = useState<MarketSnapshot | null>(null);
   const [features, setFeatures] = useState<FeatureVector | null>(null);
@@ -395,15 +404,17 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-[#080E1A] text-white flex flex-row overflow-x-hidden font-sans">
-      {/* Pinned Left Sidebar */}
-      {sidebarOpen && (
-        <Sidebar
-          activeTab={activeTab}
-          onSelectTab={(tab) => setActiveTab(tab)}
-          botStatus={botState.status === 'RUNNING' ? 'ACTIVE' : botState.status === 'PAUSED' ? 'PAUSED' : 'IDLE'}
-          botName={botState.symbol ? `QUANTARION ${botState.symbol}` : 'QUANTARION V1.3'}
-        />
-      )}
+      {/* Pinned / Collapsible Left Sidebar */}
+      <Sidebar
+        activeTab={activeTab}
+        onSelectTab={(tab) => setActiveTab(tab)}
+        botStatus={botState.status === 'RUNNING' ? 'ACTIVE' : botState.status === 'PAUSED' ? 'PAUSED' : 'IDLE'}
+        botName={botState.symbol ? `QUANTARION ${botState.symbol}` : 'QUANTARION V1.3'}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
+        isMobileOpen={isMobileMenuOpen}
+        onCloseMobile={() => setIsMobileMenuOpen(false)}
+      />
 
       {/* Main Column */}
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-y-auto custom-scrollbar">
@@ -417,7 +428,8 @@ export default function Home() {
           todayPnLPercent={currentPnLPercent}
           exchangeName="BINANCE"
           isExchangeConnected={true}
-          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+          isSidebarCollapsed={isSidebarCollapsed}
+          onToggleSidebar={handleToggleSidebar}
           onModeChange={(m) => setAppMode(m)}
         />
 
@@ -429,7 +441,7 @@ export default function Home() {
         )}
 
         {/* Dynamic Page Views */}
-        <main className="flex-1 px-6 py-4">
+        <main className="flex-1 px-3 sm:px-6 py-3 sm:py-4">
           {activeTab === 'dashboard' && (
             <DashboardView
               snapshot={snapshot}
