@@ -52,10 +52,11 @@ export async function POST(req: NextRequest) {
     }
 
     let textToSend = body.message || '';
-    const command = (webhookText || body.command || '').toLowerCase();
+    const rawCommand = (webhookText || body.command || '').trim().toLowerCase();
+    const command = rawCommand.split('@')[0].split(' ')[0];
 
     // Handle interactive Telegram commands
-    if (command.startsWith('/status')) {
+    if (command === '/status' || rawCommand.startsWith('/status')) {
       textToSend = `
 <b>🤖 [AI QUANT TRADER] SYSTEM STATUS</b>
 ━━━━━━━━━━━━━━━━━━━━
