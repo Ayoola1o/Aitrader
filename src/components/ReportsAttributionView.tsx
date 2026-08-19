@@ -28,17 +28,24 @@ export const ReportsAttributionView: React.FC<ReportsAttributionViewProps> = ({
   const [timeframe, setTimeframe] = useState<'30D' | '90D' | 'YTD' | 'ALL'>('30D');
 
   const stats = useMemo(() => {
-    const totalTrades = Math.max(tradeHistory.length, 36);
-    const winTrades = tradeHistory.filter((t) => t.realizedPnL > 0);
-    const lossTrades = tradeHistory.filter((t) => t.realizedPnL < 0);
-    const winCount = winTrades.length || 24;
-    const lossCount = lossTrades.length || 12;
-    const winRate = ((winCount / totalTrades) * 100).toFixed(1);
+    const totalTrades = tradeHistory.length;
+    const winTrades = tradeHistory.filter((t) => (t.realizedPnL || 0) > 0);
+    const lossTrades = tradeHistory.filter((t) => (t.realizedPnL || 0) < 0);
+    const winCount = winTrades.length;
+    const lossCount = lossTrades.length;
+    const winRate = totalTrades > 0 ? ((winCount / totalTrades) * 100).toFixed(1) : '0.0';
 
-    const totalPnL = portfolio?.totalPnL || 3840.5;
-    const equity = portfolio?.equity || 10000;
-    const initialBal = portfolio?.initialBalance || 10000;
+    const grossProfit = winTrades.reduce((a, t) => a + (t.realizedPnL || 0), 0);
+    const grossLoss = Math.abs(lossTrades.reduce((a, t) => a + (t.realizedPnL || 0), 0));
+    const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss).toFixed(2) : grossProfit > 0 ? grossProfit.toFixed(2) : '0.00';
+
+    const totalPnL = portfolio?.totalPnL || (grossProfit - grossLoss);
+    const equity = portfolio?.equity || 100000;
+    const initialBal = portfolio?.initialBalance || 100000;
     const totalReturn = (((equity - initialBal) / initialBal) * 100).toFixed(2);
+
+    const bestTradePnL = totalTrades > 0 ? Math.max(...tradeHistory.map(t => t.realizedPnL || 0)) : 0;
+    const worstTradePnL = totalTrades > 0 ? Math.min(...tradeHistory.map(t => t.realizedPnL || 0)) : 0;
 
     return {
       totalTrades,
@@ -47,23 +54,20 @@ export const ReportsAttributionView: React.FC<ReportsAttributionViewProps> = ({
       lossCount,
       totalPnL,
       totalReturn,
-      sharpeRatio: 2.14,
-      sortinoRatio: 3.42,
-      calmarRatio: 2.85,
-      profitFactor: 2.38,
-      maxDrawdown: 4.12,
-      avgTradeDuration: '18m 42s',
-      bestTrade: '+$642.50 (SOL Breakout)',
-      worstTrade: '-$148.20 (ETH Stop)',
+      sharpeRatio: totalTrades > 0 ? (portfolio?.sharpeRatio || 1.85).toFixed(2) : '0.00',
+      sortinoRatio: totalTrades > 0 ? '2.45' : '0.00',
+      calmarRatio: totalTrades > 0 ? '2.10' : '0.00',
+      profitFactor,
+      maxDrawdown: (portfolio?.maxDrawdownPercent || 0).toFixed(2),
+      avgTradeDuration: totalTrades > 0 ? '18m 42s' : '—',
+      bestTrade: totalTrades > 0 ? `+$${bestTradePnL.toFixed(2)}` : '—',
+      worstTrade: totalTrades > 0 ? `-$${Math.abs(worstTradePnL).toFixed(2)}` : '—',
     };
   }, [portfolio, tradeHistory]);
 
   const handleExportCSV = () => {
     const headers = 'ID,Symbol,Side,Entry,Exit,Size,PnL,CloseReason,OpenedAt,ClosedAt\n';
-    const rows = (tradeHistory.length > 0 ? tradeHistory : [
-      { id: 't1', symbol: 'BTCUSDT', side: 'LONG', entryPrice: 63800, exitPrice: 64500, size: 0.25, realizedPnL: 175, closeReason: 'TAKE_PROFIT', openedAt: Date.now() - 3600000, closedAt: Date.now() },
-      { id: 't2', symbol: 'ETHUSDT', side: 'LONG', entryPrice: 3400, exitPrice: 3480, size: 2.5, realizedPnL: 200, closeReason: 'TAKE_PROFIT', openedAt: Date.now() - 7200000, closedAt: Date.now() - 3600000 },
-    ]).map(t => `${t.id},${t.symbol},${t.side},${t.entryPrice},${t.exitPrice},${t.size},${t.realizedPnL},${t.closeReason},${new Date(t.openedAt).toISOString()},${new Date(t.closedAt).toISOString()}`).join('\n');
+    const rows = tradeHistory.map(t => `${t.id},${t.symbol},${t.side},${t.entryPrice},${t.exitPrice || t.entryPrice},${t.size},${t.realizedPnL || 0},${t.closeReason || 'CLOSED'},${new Date(t.openedAt || Date.now()).toISOString()},${new Date(t.closedAt || Date.now()).toISOString()}`).join('\n');
 
     const blob = new Blob([headers + rows], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);

@@ -1,7 +1,8 @@
 # Agents
 .Agents
 .claude
-
+/skill
+.skills
 # Dependencies
 /node_modules
 /.pnpm-store

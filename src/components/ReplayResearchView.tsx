@@ -62,13 +62,25 @@ export const ReplayResearchView: React.FC<ReplayResearchViewProps> = ({
     conf: number;
   } | null>(null);
 
-  const scatterPoints = React.useMemo(() => generateScatterData(), []);
   const decisions = dbPersistence.getDecisions();
 
-  const totalDecisions = 616;
-  const avgConfidence = 55;
-  const mostFrequentRegime = 'TRANSITION (210)';
-  const pendingOutcomes = 616;
+  const scatterPoints = React.useMemo(() => {
+    if (decisions.length > 0) {
+      return decisions.map((d, idx) => ({
+        id: d.decisionId || `DEC-${idx + 1}`,
+        index: idx + 1,
+        confidence: Math.round((d.confidence || 0.6) * 100),
+        action: (d.action === 'BUY' ? 'BUY' : d.action === 'SELL' ? 'SELL' : 'NO_TRADE') as 'BUY' | 'SELL' | 'NO_TRADE',
+        regime: 'ACTIVE_MARKET',
+      }));
+    }
+    return [];
+  }, [decisions]);
+
+  const totalDecisions = decisions.length;
+  const avgConfidence = totalDecisions > 0 ? Math.round(decisions.reduce((a, d) => a + (d.confidence || 0.6), 0) / totalDecisions * 100) : 0;
+  const mostFrequentRegime = totalDecisions > 0 ? 'ACTIVE_MARKET' : 'NONE';
+  const pendingOutcomes = totalDecisions;
 
   // Heatmap rows
   const heatmapData = [

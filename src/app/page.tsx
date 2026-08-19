@@ -398,9 +398,9 @@ export default function Home() {
   };
 
   const { title, subtitle } = getTabInfo();
-  const currentEquity = portfolio?.equity ?? 125340.27;
-  const currentPnL = portfolio?.dailyPnL ?? 1245.31;
-  const currentPnLPercent = portfolio ? (currentPnL / (currentEquity - currentPnL)) * 100 : 1.01;
+  const currentEquity = portfolio?.equity ?? (paperBroker.getPortfolioState(snapshot?.price || 64713).equity || 100000);
+  const currentPnL = portfolio?.dailyPnL ?? (paperBroker.getPortfolioState(snapshot?.price || 64713).dailyPnL || 0);
+  const currentPnLPercent = currentEquity > 0 ? (currentPnL / currentEquity) * 100 : 0;
 
   return (
     <div className="min-h-screen bg-[#080E1A] text-white flex flex-row overflow-x-hidden font-sans">

@@ -11,6 +11,7 @@ import {
   Settings,
   PlusCircle,
   Download,
+  Filter,
 } from 'lucide-react';
 
 export type StrategyHubNavId =
@@ -46,7 +47,7 @@ export const StrategySidebar: React.FC<StrategySidebarProps> = ({
   activeCount = 2,
   paperCount = 5,
   pausedCount = 3,
-  archivedCount = 14,
+  archivedCount = 0,
   onCreateStrategy,
   onImportStrategy,
   onOpenSettings,
@@ -61,111 +62,125 @@ export const StrategySidebar: React.FC<StrategySidebarProps> = ({
     { id: 'settings' as StrategyHubNavId, label: 'SETTINGS', icon: Settings },
   ];
 
+  const statusFilters: { id: StrategyStatusFilter; label: string; count: number; color: string }[] = [
+    { id: 'ALL', label: 'All Strategies', count: activeCount + paperCount + pausedCount + archivedCount, color: 'bg-blue-400' },
+    { id: 'ACTIVE', label: 'Active/Live', count: activeCount, color: 'bg-emerald-400' },
+    { id: 'PAPER', label: 'Paper Trading', count: paperCount, color: 'bg-amber-400' },
+    { id: 'PAUSED', label: 'Paused', count: pausedCount, color: 'bg-rose-400' },
+  ];
+
   return (
-    <aside className="w-56 bg-[#080E1A] border-r border-[#1E293B] flex flex-col shrink-0 select-none py-3 px-2 space-y-4">
-      {/* Strategy Hub Nav List */}
-      <div className="space-y-0.5">
-        <div className="text-[10px] uppercase font-bold text-gray-500 tracking-wider px-3 mb-1">Strategy Hub</div>
-        {mainNavItems.map(({ id, label, icon: Icon }) => {
-          const isActive = activeSection === id;
-          return (
-            <button
-              key={id}
-              onClick={() => onSelectSection(id)}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all text-left group ${
-                isActive
-                  ? 'bg-blue-600/20 text-cyan-400 border border-cyan-500/30 shadow-sm shadow-cyan-500/10'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-[#0E1726]'
-              }`}
-            >
-              <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-cyan-400' : 'text-gray-400 group-hover:text-gray-300'}`} />
-              <span className="truncate">{label}</span>
-            </button>
-          );
-        })}
+    <>
+      {/* ── MOBILE / TABLET HORIZONTAL BAR (< 1024px) ── */}
+      <div className="lg:hidden w-full space-y-2 bg-[#080E1A] p-2.5 rounded-2xl border border-[#1E293B]">
+        {/* Status Filter Chips Horizontal */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
+          {statusFilters.map(({ id, label, count, color }) => {
+            const isActive = statusFilter === id;
+            return (
+              <button
+                key={id}
+                onClick={() => onSelectStatusFilter(id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all shrink-0 ${
+                  isActive
+                    ? 'bg-blue-600/20 text-cyan-400 border border-cyan-500/30 shadow-sm'
+                    : 'text-gray-400 hover:text-white bg-[#0B111E] border border-gray-800'
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${color}`} />
+                <span>{label}</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-gray-800 font-mono text-gray-300">
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Status Registry */}
-      <div className="space-y-1 pt-1">
-        <div className="text-[10px] uppercase font-bold text-gray-500 tracking-wider px-3 mb-1.5">Status Registry</div>
-        <button
-          onClick={() => onSelectStatusFilter(statusFilter === 'ACTIVE' ? 'ALL' : 'ACTIVE')}
-          className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-            statusFilter === 'ACTIVE' ? 'bg-emerald-500/15 text-emerald-400' : 'text-gray-300 hover:bg-[#0E1726]'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50" />
-            <span>Active/Live</span>
-          </div>
-          <span className="text-gray-400 font-mono text-[11px]">({activeCount})</span>
-        </button>
+      {/* ── DESKTOP VERTICAL STRATEGY SIDEBAR (>= 1024px) ── */}
+      <aside className="hidden lg:flex w-56 bg-[#080E1A] border-r border-[#1E293B] flex-col shrink-0 select-none py-3 px-2 space-y-4">
+        {/* Strategy Hub Nav List */}
+        <div className="space-y-0.5">
+          <div className="text-[10px] uppercase font-bold text-gray-500 tracking-wider px-3 mb-1">Strategy Hub</div>
+          {mainNavItems.map(({ id, label, icon: Icon }) => {
+            const isActive = activeSection === id;
+            return (
+              <button
+                key={id}
+                onClick={() => onSelectSection(id)}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all text-left group ${
+                  isActive
+                    ? 'bg-blue-600/20 text-cyan-400 border border-cyan-500/30 shadow-sm shadow-cyan-500/10'
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-[#0E1726]'
+                }`}
+              >
+                <Icon
+                  className={`w-4 h-4 transition-colors ${
+                    isActive ? 'text-cyan-400' : 'text-gray-400 group-hover:text-gray-300'
+                  }`}
+                />
+                <span className="tracking-wide">{label}</span>
+                {isActive && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-sm shadow-cyan-400" />}
+              </button>
+            );
+          })}
+        </div>
 
-        <button
-          onClick={() => onSelectStatusFilter(statusFilter === 'PAPER' ? 'ALL' : 'PAPER')}
-          className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-            statusFilter === 'PAPER' ? 'bg-amber-500/15 text-amber-400' : 'text-gray-300 hover:bg-[#0E1726]'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-amber-400" />
-            <span>Paper Trading</span>
-          </div>
-          <span className="text-gray-400 font-mono text-[11px]">({paperCount})</span>
-        </button>
+        {/* Status Registry Filter Section */}
+        <div className="px-1 space-y-1">
+          <div className="text-[10px] uppercase tracking-wider text-gray-400 font-bold px-2 mb-1">Status Registry</div>
+          {statusFilters.map(({ id, label, count, color }) => {
+            const isActive = statusFilter === id;
+            return (
+              <button
+                key={id}
+                onClick={() => onSelectStatusFilter(id)}
+                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors ${
+                  isActive ? 'bg-[#0B111E] text-white font-bold border border-gray-800' : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${color}`} />
+                  <span>{label}</span>
+                </div>
+                <span className="text-[11px] font-mono text-gray-400 bg-gray-900 px-1.5 py-0.5 rounded">
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
 
-        <button
-          onClick={() => onSelectStatusFilter(statusFilter === 'PAUSED' ? 'ALL' : 'PAUSED')}
-          className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-            statusFilter === 'PAUSED' ? 'bg-rose-500/15 text-rose-400' : 'text-gray-300 hover:bg-[#0E1726]'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-rose-500" />
-            <span>Paused</span>
-          </div>
-          <span className="text-gray-400 font-mono text-[11px]">({pausedCount})</span>
-        </button>
+        {/* Quick Actions List */}
+        <div className="px-1 space-y-1 pt-1">
+          <div className="text-[10px] uppercase tracking-wider text-gray-400 font-bold px-2 mb-1">Quick Actions</div>
 
-        <button
-          onClick={() => onSelectStatusFilter(statusFilter === 'ARCHIVED' ? 'ALL' : 'ARCHIVED')}
-          className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-            statusFilter === 'ARCHIVED' ? 'bg-gray-700/30 text-gray-300' : 'text-gray-400 hover:bg-[#0E1726]'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full border border-gray-500" />
-            <span>Archived</span>
-          </div>
-          <span className="text-gray-500 font-mono text-[11px]">({archivedCount})</span>
-        </button>
-      </div>
+          <button
+            onClick={onCreateStrategy}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-gray-300 hover:text-cyan-400 hover:bg-[#0E1726] transition-colors text-left"
+          >
+            <PlusCircle className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Create Strategy</span>
+          </button>
 
-      {/* Quick Actions */}
-      <div className="space-y-1 pt-1">
-        <div className="text-[10px] uppercase font-bold text-gray-500 tracking-wider px-3 mb-1">Quick Actions</div>
-        <button
-          onClick={onCreateStrategy}
-          className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-300 hover:text-white hover:bg-[#0E1726] transition-colors border border-transparent hover:border-gray-800"
-        >
-          <PlusCircle className="w-3.5 h-3.5 text-cyan-400" />
-          <span>Create Strategy</span>
-        </button>
-        <button
-          onClick={onImportStrategy}
-          className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-300 hover:text-white hover:bg-[#0E1726] transition-colors border border-transparent hover:border-gray-800"
-        >
-          <Download className="w-3.5 h-3.5 text-blue-400" />
-          <span>Import Strategy</span>
-        </button>
-        <button
-          onClick={onOpenSettings}
-          className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-300 hover:text-white hover:bg-[#0E1726] transition-colors border border-transparent hover:border-gray-800"
-        >
-          <Settings className="w-3.5 h-3.5 text-gray-400" />
-          <span>Global Settings</span>
-        </button>
-      </div>
-    </aside>
+          <button
+            onClick={onImportStrategy}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-gray-300 hover:text-emerald-400 hover:bg-[#0E1726] transition-colors text-left"
+          >
+            <Download className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Import Strategy</span>
+          </button>
+
+          <button
+            onClick={onOpenSettings}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-gray-300 hover:text-purple-400 hover:bg-[#0E1726] transition-colors text-left"
+          >
+            <Settings className="w-3.5 h-3.5 text-purple-400" />
+            <span>Global Settings</span>
+          </button>
+        </div>
+      </aside>
+    </>
   );
 };

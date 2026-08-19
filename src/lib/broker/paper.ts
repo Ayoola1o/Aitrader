@@ -16,24 +16,75 @@ export class PaperBroker {
   private totalFees: number = 0;
   private orderCounter = 0;
 
-  constructor(startingBalance = 10000) {
+  constructor(startingBalance = 100000) {
     this.balance = startingBalance;
     this.initialBalance = startingBalance;
     this.dailyStartBalance = startingBalance;
     this.peakEquity = startingBalance;
     this.equityCurve = [{ time: Date.now(), equity: startingBalance }];
+    this.loadFromStorage();
   }
 
-  setStartingBalance(amount: number) {
-    this.balance = amount;
-    this.initialBalance = amount;
-    this.dailyStartBalance = amount;
-    this.peakEquity = amount;
-    this.equityCurve = [{ time: Date.now(), equity: amount }];
-    this.positions.clear();
-    this.orders = [];
-    this.tradeHistory = [];
-    this.totalFees = 0;
+  public loadFromStorage(): boolean {
+    if (typeof window === 'undefined') return false;
+    try {
+      const raw = localStorage.getItem('aitrader_paper_broker_state');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.balance === 'number') {
+          this.balance = parsed.balance;
+          this.initialBalance = parsed.initialBalance ?? this.initialBalance;
+          this.dailyStartBalance = parsed.dailyStartBalance ?? this.dailyStartBalance;
+          this.peakEquity = parsed.peakEquity ?? this.peakEquity;
+          this.totalFees = parsed.totalFees ?? 0;
+          if (Array.isArray(parsed.orders)) this.orders = parsed.orders;
+          if (Array.isArray(parsed.tradeHistory)) this.tradeHistory = parsed.tradeHistory;
+          if (Array.isArray(parsed.positions)) {
+            this.positions = new Map(parsed.positions.map((p: Position) => [p.id, p]));
+          }
+          if (Array.isArray(parsed.equityCurve) && parsed.equityCurve.length > 0) {
+            this.equityCurve = parsed.equityCurve;
+          }
+          return true;
+        }
+      }
+    } catch {}
+    return false;
+  }
+
+  public saveToStorage(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      const state = {
+        balance: this.balance,
+        initialBalance: this.initialBalance,
+        dailyStartBalance: this.dailyStartBalance,
+        peakEquity: this.peakEquity,
+        totalFees: this.totalFees,
+        orders: this.orders,
+        tradeHistory: this.tradeHistory,
+        positions: Array.from(this.positions.values()),
+        equityCurve: this.equityCurve.slice(-200),
+      };
+      localStorage.setItem('aitrader_paper_broker_state', JSON.stringify(state));
+    } catch {}
+  }
+
+  setStartingBalance(amount: number, forceReset: boolean = false) {
+    if (forceReset || (this.positions.size === 0 && this.tradeHistory.length === 0)) {
+      this.balance = amount;
+      this.initialBalance = amount;
+      this.dailyStartBalance = amount;
+      this.peakEquity = amount;
+      this.equityCurve = [{ time: Date.now(), equity: amount }];
+      if (forceReset) {
+        this.positions.clear();
+        this.orders = [];
+        this.tradeHistory = [];
+        this.totalFees = 0;
+      }
+      this.saveToStorage();
+    }
   }
 
   // ── Submit Order ─────────────────────────────────────────────────────────
@@ -92,6 +143,7 @@ export class PaperBroker {
       riskR: 0,
     };
     this.positions.set(positionId, position);
+    this.saveToStorage();
 
     return { success: true, message: `Filled @ $${fillPrice} (slippage: $${slippage.toFixed(4)}, fee: $${fee.toFixed(4)})`, orderId: positionId };
   }
@@ -153,6 +205,7 @@ export class PaperBroker {
 
     this.positions.delete(positionId);
     this.equityCurve.push({ time: Date.now(), equity: this.getEquity(marketPrice) });
+    this.saveToStorage();
     return { success: true, pnl: Number(netPnL.toFixed(2)) };
   }
 

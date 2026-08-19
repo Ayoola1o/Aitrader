@@ -16,6 +16,7 @@ import {
 } from '@/types/trading';
 import { BotState, BotConfig } from '@/lib/bot/engine';
 import { InteractiveChart } from './InteractiveChart';
+import { BotManager, BotItem } from './BotManager';
 import {
   TrendingUp,
   TrendingDown,
@@ -100,6 +101,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 }) => {
   const [activeWorkspaceTab, setActiveWorkspaceTab] =
     useState<WorkspaceTab>('POSITIONS');
+  const [mobileTab, setMobileTab] = useState<'CHART' | 'SIGNAL' | 'POSITIONS' | 'BOT_MARKET'>('CHART');
   const [showSpawnModal, setShowSpawnModal] = useState(false);
   const [showAgentModal, setShowAgentModal] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -168,28 +170,26 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       message: 'Order executed: BUY 0.03 BTCUSDT',
       color: 'text-cyan-300',
     },
-    {
-      id: 8,
-      time: '11:03:15',
-      tag: '[EXECUTION]',
-      message: 'Filled @ 64,250.18 | Slippage: 0.18',
-      color: 'text-indigo-300',
-    },
-    {
-      id: 9,
-      time: '11:03:15',
-      tag: '[P&L]',
-      message: 'Position opened | Unrealized: +$5.10',
-      color: 'text-emerald-400',
-    },
-    {
-      id: 10,
-      time: '11:03:15',
-      tag: '[SYSTEM]',
-      message: 'System operational',
-      color: 'text-gray-400',
-    },
   ]);
+
+  // Live Senpi Smart Money & Whale Flow State
+  const [smartMoneyData, setSmartMoneyData] = useState<any | null>(null);
+
+  const fetchSmartMoney = async () => {
+    try {
+      const res = await fetch(`/api/smart-money?symbol=${activeSymbol}`, { cache: 'no-store' });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.success) setSmartMoneyData(d);
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    fetchSmartMoney();
+    const interval = setInterval(fetchSmartMoney, 10000);
+    return () => clearInterval(interval);
+  }, [activeSymbol]);
 
   const logContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -328,12 +328,56 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
   return (
     <div className="space-y-3 pb-8 text-white">
+      {/* ── MOBILE 4-WAY SEGMENTED CONTROLLER (< xl) ── */}
+      <div className="xl:hidden flex items-center gap-1.5 overflow-x-auto pb-1 bg-[#0B111E] p-2 rounded-2xl border border-[#1E293B]">
+        <button
+          onClick={() => setMobileTab('CHART')}
+          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all text-center ${
+            mobileTab === 'CHART'
+              ? 'bg-blue-600/30 text-cyan-400 border border-cyan-500/40 shadow-sm'
+              : 'text-gray-400 hover:text-white bg-[#080E1A] border border-gray-800'
+          }`}
+        >
+          📊 Chart
+        </button>
+        <button
+          onClick={() => setMobileTab('SIGNAL')}
+          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all text-center ${
+            mobileTab === 'SIGNAL'
+              ? 'bg-blue-600/30 text-cyan-400 border border-cyan-500/40 shadow-sm'
+              : 'text-gray-400 hover:text-white bg-[#080E1A] border border-gray-800'
+          }`}
+        >
+          🤖 AI Signals
+        </button>
+        <button
+          onClick={() => setMobileTab('POSITIONS')}
+          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all text-center ${
+            mobileTab === 'POSITIONS'
+              ? 'bg-blue-600/30 text-cyan-400 border border-cyan-500/40 shadow-sm'
+              : 'text-gray-400 hover:text-white bg-[#080E1A] border border-gray-800'
+          }`}
+        >
+          💼 Positions
+        </button>
+        <button
+          onClick={() => setMobileTab('BOT_MARKET')}
+          className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all text-center ${
+            mobileTab === 'BOT_MARKET'
+              ? 'bg-blue-600/30 text-cyan-400 border border-cyan-500/40 shadow-sm'
+              : 'text-gray-400 hover:text-white bg-[#080E1A] border border-gray-800'
+          }`}
+        >
+          ⚡ Bot & Watch
+        </button>
+      </div>
+
       {/* ── 3-PANEL INSTITUTIONAL TRADING WORKSTATION ── */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-3 items-start">
         {/* ═════════════════════════════════════════════════════════════════════
             PANEL 1 (LEFT ~24%): ACTIVE BOT + MARKET WATCH + 8 SPECIALISTS
             ═════════════════════════════════════════════════════════════════════ */}
-        <div className="xl:col-span-3 space-y-3">
+        <div className={`xl:col-span-3 space-y-3 ${mobileTab === 'BOT_MARKET' ? 'block' : 'hidden xl:block'}`}>
           {/* Active Bot Card */}
           <div className="bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] space-y-3 shadow-md">
             <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">
@@ -539,7 +583,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         {/* ═════════════════════════════════════════════════════════════════════
             PANEL 2 (CENTER ~50%): CANDLESTICK CHART + MULTI-TAB WORKSPACE
             ═════════════════════════════════════════════════════════════════════ */}
-        <div className="xl:col-span-6 space-y-3 min-w-0">
+        <div className={`xl:col-span-6 space-y-3 min-w-0 ${mobileTab === 'CHART' || mobileTab === 'POSITIONS' ? 'block' : 'hidden xl:block'}`}>
           {/* Main Candlestick Chart */}
           <InteractiveChart
             candles={snapshot?.candles || []}
@@ -801,7 +845,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         {/* ═════════════════════════════════════════════════════════════════════
             PANEL 3 (RIGHT ~26%): AI SIGNAL + AGENT CONSENSUS + RISK GATE + LOGS
             ═════════════════════════════════════════════════════════════════════ */}
-        <div className="xl:col-span-3 space-y-3">
+        <div className={`xl:col-span-3 space-y-3 ${mobileTab === 'SIGNAL' ? 'block' : 'hidden xl:block'}`}>
           {/* AI Signal Card (100% Dynamic from live signals & fusion engine) */}
           {(() => {
             const dominantAction = decision?.action || fusion?.dominantAction || 'BUY';
@@ -955,6 +999,65 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                   >
                     View Agent Breakdown ({specialistAgents.length} Agents)
                   </button>
+                </div>
+
+                {/* Senpi Smart Money & Whale Telemetry Card */}
+                <div className="bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] space-y-3 shadow-md">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                      <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">
+                        Smart Money & Whale Flow
+                      </span>
+                    </div>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-bold border border-cyan-500/20 font-mono">
+                      Hyperliquid L1
+                    </span>
+                  </div>
+
+                  {smartMoneyData?.targetAsset ? (
+                    <div className="space-y-2.5 text-xs">
+                      <div className="flex items-center justify-between p-2 rounded-lg bg-[#080E1A] border border-gray-800">
+                        <div>
+                          <span className="text-[10px] text-gray-400 block">Whale Cohort (≥$1M PnL)</span>
+                          <span className={`font-black ${smartMoneyData.targetAsset.smartBias > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {smartMoneyData.targetAsset.smartDirection} ({smartMoneyData.targetAsset.smartBias > 0 ? '+' : ''}{smartMoneyData.targetAsset.smartBias})
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] text-gray-400 block">Whale Net Flow</span>
+                          <span className="font-mono font-bold text-white">
+                            {smartMoneyData.targetAsset.whaleNetUsd >= 0 ? '+' : '-'}${Math.abs(smartMoneyData.targetAsset.whaleNetUsd / 1000000).toFixed(1)}M
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between p-2 rounded-lg bg-[#080E1A] border border-gray-800">
+                        <div>
+                          <span className="text-[10px] text-gray-400 block">Retail Crowd ($10k-$100k)</span>
+                          <span className={`font-black ${smartMoneyData.targetAsset.crowdBias > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {smartMoneyData.targetAsset.crowdDirection} ({smartMoneyData.targetAsset.crowdBias > 0 ? '+' : ''}{smartMoneyData.targetAsset.crowdBias})
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] text-gray-400 block">Divergence State</span>
+                          <span className={`font-bold ${smartMoneyData.targetAsset.divergence ? 'text-amber-400' : 'text-emerald-400'}`}>
+                            {smartMoneyData.targetAsset.divergence ? '⚡ DIVERGENT (FADE)' : '✓ ALIGNED'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {smartMoneyData.targetAsset.actionRecommendation && (
+                        <div className="p-2 rounded-lg bg-cyan-950/30 border border-cyan-500/30 text-[11px] text-cyan-300 leading-snug">
+                          {smartMoneyData.targetAsset.actionRecommendation}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-500 py-2 text-center font-mono">
+                      Syncing Hyperliquid smart money flow...
+                    </div>
+                  )}
                 </div>
               </>
             );

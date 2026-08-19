@@ -38,34 +38,55 @@ const DEFAULT_DATA: EquityDataPoint[] = [
 ];
 
 export const EquityCurveChart: React.FC<EquityCurveChartProps> = ({
-  data = DEFAULT_DATA,
+  data,
+  initialEquity = 100000,
 }) => {
   const [timeframe, setTimeframe] = useState<'24H' | '7D' | '30D' | 'ALL'>('7D');
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
+  // Generate clean real baseline if no closed trades yet
+  const chartData: EquityDataPoint[] = data && data.length > 0
+    ? data
+    : Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(Date.now() - (6 - i) * 86400000);
+        const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return {
+          date: dateStr,
+          timestamp: d.getTime(),
+          equity: initialEquity,
+          benchmark: initialEquity,
+        };
+      });
+
   const height = 220;
-  const paddingLeft = 50;
+  const paddingLeft = 60;
   const paddingRight = 20;
   const paddingTop = 20;
   const paddingBottom = 30;
 
-  const yMin = 80000;
-  const yMax = 130000;
-  const yRange = yMax - yMin;
+  const allEquities = chartData.map((d) => d.equity);
+  const allBenchmarks = chartData.map((d) => d.benchmark);
+  const minVal = Math.min(...allEquities, ...allBenchmarks);
+  const maxVal = Math.max(...allEquities, ...allBenchmarks);
 
-  const yTicks = [80000, 90000, 100000, 110000, 120000, 130000];
-  const dateLabels = ['May 18', 'May 19', 'May 20', 'May 21', 'May 22', 'May 23', 'May 24'];
+  // Dynamic Y bounds
+  const yMin = minVal === maxVal ? minVal * 0.95 : Math.floor((minVal * 0.98) / 1000) * 1000;
+  const yMax = minVal === maxVal ? maxVal * 1.05 : Math.ceil((maxVal * 1.02) / 1000) * 1000;
+  const yRange = Math.max(1, yMax - yMin);
+
+  const step = yRange / 5;
+  const yTicks = Array.from({ length: 6 }, (_, i) => Math.round(yMin + i * step));
 
   const width = 600; // SVG viewBox coordinate width
   const chartW = width - paddingLeft - paddingRight;
   const chartH = height - paddingTop - paddingBottom;
 
   const getY = (val: number) => paddingTop + (1 - (val - yMin) / yRange) * chartH;
-  const getX = (i: number) => paddingLeft + (i / (data.length - 1)) * chartW;
+  const getX = (i: number) => paddingLeft + (chartData.length > 1 ? (i / (chartData.length - 1)) * chartW : chartW / 2);
 
   // Build Equity SVG Path
-  const points = data.map((d, i) => ({ x: getX(i), y: getY(d.equity) }));
+  const points = chartData.map((d, i) => ({ x: getX(i), y: getY(d.equity) }));
   let equityPathD = `M ${points[0].x} ${points[0].y}`;
   for (let i = 0; i < points.length - 1; i++) {
     const p0 = points[i];
@@ -76,7 +97,7 @@ export const EquityCurveChart: React.FC<EquityCurveChartProps> = ({
   const equityAreaD = `${equityPathD} L ${points[points.length - 1].x} ${height - paddingBottom} L ${points[0].x} ${height - paddingBottom} Z`;
 
   // Build Benchmark (Buy & Hold) SVG Path
-  const benchPoints = data.map((d, i) => ({ x: getX(i), y: getY(d.benchmark) }));
+  const benchPoints = chartData.map((d, i) => ({ x: getX(i), y: getY(d.benchmark) }));
   let benchPathD = `M ${benchPoints[0].x} ${benchPoints[0].y}`;
   for (let i = 0; i < benchPoints.length - 1; i++) {
     const p0 = benchPoints[i];
@@ -90,7 +111,7 @@ export const EquityCurveChart: React.FC<EquityCurveChartProps> = ({
     const rect = containerRef.current.getBoundingClientRect();
     const xPos = e.clientX - rect.left;
     const ratio = Math.max(0, Math.min(1, (xPos - paddingLeft) / (rect.width - paddingLeft - paddingRight)));
-    const idx = Math.round(ratio * (data.length - 1));
+    const idx = Math.round(ratio * (chartData.length - 1));
     setHoverIndex(idx);
   };
 
@@ -98,7 +119,7 @@ export const EquityCurveChart: React.FC<EquityCurveChartProps> = ({
     setHoverIndex(null);
   };
 
-  const activePoint = hoverIndex !== null ? data[hoverIndex] : null;
+  const activePoint = hoverIndex !== null ? chartData[hoverIndex] : null;
 
   return (
     <div className="flex flex-col h-full">
@@ -176,11 +197,11 @@ export const EquityCurveChart: React.FC<EquityCurveChartProps> = ({
           })}
 
           {/* X-axis date labels */}
-          {dateLabels.map((date, idx) => {
-            const x = paddingLeft + (idx / (dateLabels.length - 1)) * chartW;
+          {chartData.map((pt, idx) => {
+            const x = paddingLeft + (chartData.length > 1 ? (idx / (chartData.length - 1)) * chartW : chartW / 2);
             return (
               <text
-                key={date}
+                key={idx}
                 x={x}
                 y={height - 8}
                 textAnchor="middle"
@@ -188,7 +209,7 @@ export const EquityCurveChart: React.FC<EquityCurveChartProps> = ({
                 fontSize="10"
                 fontFamily="sans-serif"
               >
-                {date}
+                {pt.date}
               </text>
             );
           })}
@@ -245,7 +266,7 @@ export const EquityCurveChart: React.FC<EquityCurveChartProps> = ({
           <div
             className="absolute top-2 pointer-events-none bg-[#0B111E]/95 border border-blue-500/40 rounded-lg p-2 text-xs shadow-xl backdrop-blur-md transition-all z-20"
             style={{
-              left: `${Math.min(75, Math.max(10, (hoverIndex / (data.length - 1)) * 100))}%`,
+              left: `${Math.min(75, Math.max(10, (hoverIndex / Math.max(1, chartData.length - 1)) * 100))}%`,
               transform: 'translateX(-50%)',
             }}
           >

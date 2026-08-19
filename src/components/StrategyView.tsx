@@ -73,6 +73,7 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showLogsModal, setShowLogsModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showMobileInspector, setShowMobileInspector] = useState(false);
   const [activeLogBot, setActiveLogBot] = useState<BotStrategyItem | null>(null);
   const [editingBot, setEditingBot] = useState<BotStrategyItem | null>(null);
 
@@ -87,6 +88,29 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
 
   // Real-time strategies state
   const [strategies, setStrategies] = useState<BotStrategyItem[]>([]);
+
+  // 97 Senpi Strategies Catalog State
+  const [catalogStrategies, setCatalogStrategies] = useState<any[]>([]);
+  const [catalogSections, setCatalogSections] = useState<string[]>([]);
+  const [catalogSectionFilter, setCatalogSectionFilter] = useState<'ALL' | number>('ALL');
+  const [catalogSearch, setCatalogSearch] = useState('');
+
+  const fetchCatalog = async () => {
+    try {
+      const res = await fetch('/api/strategies/catalog', { cache: 'no-store' });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.success && Array.isArray(d.strategies)) {
+          setCatalogStrategies(d.strategies);
+          if (Array.isArray(d.sections)) setCatalogSections(d.sections);
+        }
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    fetchCatalog();
+  }, []);
 
   // Compute live fusion score from real snapshot
   const liveFusionScore = useMemo(() => {
@@ -444,8 +468,8 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
   };
 
   return (
-    <div className="flex gap-4 min-h-[calc(100vh-8rem)]">
-      {/* Left Strategy Sidebar */}
+    <div className="flex flex-col xl:flex-row gap-4 min-h-[calc(100vh-8rem)]">
+      {/* Left Strategy Sidebar (Horizontal on mobile, vertical on desktop) */}
       <StrategySidebar
         activeSection={activeSection}
         onSelectSection={setActiveSection}
@@ -570,113 +594,162 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
           </div>
         </div>
 
-        {/* ── SUB-VIEW: MARKETPLACE / TEMPLATES ── */}
+        {/* ── SUB-VIEW: MARKETPLACE / TEMPLATES (97 SENPI STRATEGIES) ── */}
         {activeSection === 'marketplace' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div>
-                <h3 className="text-base font-bold text-white">Quant Strategy Marketplace & Presets</h3>
-                <p className="text-xs text-gray-400">Deploy institutional-grade algorithmic templates with 1 click</p>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <span>97 Institutional Quant Strategies & Presets</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 font-bold border border-cyan-500/30">
+                    Senpi Hyperliquid Ecosystem
+                  </span>
+                </h3>
+                <p className="text-xs text-gray-400">Deploy institutional algorithmic animal archetypes with 1 click directly to your cloud bot runner</p>
               </div>
-              <span className="text-xs px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-400 font-bold border border-cyan-500/30">
-                5 Verified Presets
-              </span>
+
+              {/* Quick Search */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Search 97 strategies (e.g. Hawk, Camel, Whale, SMC)..."
+                  value={catalogSearch}
+                  onChange={(e) => setCatalogSearch(e.target.value)}
+                  className="bg-[#080E1A] border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500 w-64"
+                />
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* 5 Section Filter Tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
+              <button
+                onClick={() => setCatalogSectionFilter('ALL')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                  catalogSectionFilter === 'ALL'
+                    ? 'bg-cyan-600 text-white shadow-md shadow-cyan-500/20'
+                    : 'bg-[#0B111E] text-gray-400 hover:text-white border border-gray-800'
+                }`}
+              >
+                All Strategies ({catalogStrategies.length || 97})
+              </button>
               {[
-                {
-                  title: 'AI Multi-Agent Core v1.3',
-                  desc: 'Full 5-specialist ensemble + Signal Fusion + Deterministic Risk Gate.',
-                  tag: 'POPULAR',
-                  tagColor: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
-                  target: 'BTCUSDT',
-                  winRate: '71.4%',
-                  sharpe: '2.34',
-                  speed: '30s',
-                },
-                {
-                  title: 'Whale Momentum Sweep',
-                  desc: 'EMA 20/50 Golden Cross + VWAP Volume Expansion breakout scalper.',
-                  tag: 'HIGH ALPHA',
-                  tagColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-                  target: 'ETHUSDT',
-                  winRate: '68.2%',
-                  sharpe: '2.18',
-                  speed: '15s',
-                },
-                {
-                  title: 'Order Book Liquidity Scalper',
-                  desc: 'Exploits Level 2 bid/ask depth imbalances and spread micro-fades.',
-                  tag: 'MICRO-STRUCTURE',
-                  tagColor: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-                  target: 'SOLUSDT',
-                  winRate: '74.8%',
-                  sharpe: '2.62',
-                  speed: '10s',
-                },
-                {
-                  title: 'Volatility Band Squeezer',
-                  desc: 'Trades Bollinger Band contraction releases & ATR expansions.',
-                  tag: 'LOW DRAWDOWN',
-                  tagColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
-                  target: 'XRPUSDT',
-                  winRate: '66.5%',
-                  sharpe: '1.98',
-                  speed: '45s',
-                },
-                {
-                  title: 'Mean Reversion Grid Matrix',
-                  desc: 'Statistical standard deviation bands with dynamic grid order placement.',
-                  tag: 'NEUTRAL REGIME',
-                  tagColor: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-                  target: 'BTCUSDT',
-                  winRate: '69.1%',
-                  sharpe: '2.05',
-                  speed: '60s',
-                },
-              ].map((tpl, i) => (
-                <div key={i} className="bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] space-y-3 flex flex-col justify-between hover:border-gray-700 transition-all">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className={`text-[10px] px-2 py-0.5 rounded font-black border uppercase ${tpl.tagColor}`}>
-                        {tpl.tag}
-                      </span>
-                      <span className="font-mono text-xs font-bold text-gray-300">{tpl.target}</span>
-                    </div>
-                    <h4 className="text-sm font-bold text-white">{tpl.title}</h4>
-                    <p className="text-xs text-gray-400 leading-relaxed">{tpl.desc}</p>
-                    <div className="grid grid-cols-3 gap-2 py-1 text-[11px] font-mono">
-                      <div className="p-1.5 bg-[#080E1A] rounded border border-gray-800">
-                        <span className="text-[9px] text-gray-500 block">Win Rate</span>
-                        <strong className="text-emerald-400">{tpl.winRate}</strong>
-                      </div>
-                      <div className="p-1.5 bg-[#080E1A] rounded border border-gray-800">
-                        <span className="text-[9px] text-gray-500 block">Sharpe</span>
-                        <strong className="text-cyan-400">{tpl.sharpe}</strong>
-                      </div>
-                      <div className="p-1.5 bg-[#080E1A] rounded border border-gray-800">
-                        <span className="text-[9px] text-gray-500 block">Cycle</span>
-                        <strong className="text-gray-300">{tpl.speed}</strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      setNewBotName(tpl.title);
-                      setNewBotSymbol(tpl.target as SymbolId);
-                      setNewBotStrategyPreset(tpl.title);
-                      setShowCreateModal(true);
-                    }}
-                    className="w-full py-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Deploy Template as Live Bot</span>
-                  </button>
-                </div>
+                '1. Breakout & Core Majors',
+                '2. Microstructure & Carry',
+                '3. Macro Thematic & Cross-Asset',
+                '4. Single-Asset Alpha & Commodities',
+                '5. Whales & Copy Mirrors',
+              ].map((name, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setCatalogSectionFilter(idx)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                    catalogSectionFilter === idx
+                      ? 'bg-cyan-600 text-white shadow-md shadow-cyan-500/20'
+                      : 'bg-[#0B111E] text-gray-400 hover:text-white border border-gray-800'
+                  }`}
+                >
+                  {name}
+                </button>
               ))}
             </div>
+
+            {/* Strategy Cards Grid */}
+            {(() => {
+              const displayStrategies = catalogStrategies.filter((s) => {
+                if (catalogSectionFilter !== 'ALL' && s.sectionIndex !== catalogSectionFilter) return false;
+                if (catalogSearch.trim()) {
+                  const q = catalogSearch.toLowerCase();
+                  const matchName = (s.name || '').toLowerCase().includes(q);
+                  const matchThesis = (s.thesis || '').toLowerCase().includes(q);
+                  const matchTags = Array.isArray(s.tags) && s.tags.some((t: string) => t.toLowerCase().includes(q));
+                  const matchArchetype = (s.archetype_label || '').toLowerCase().includes(q);
+                  return matchName || matchThesis || matchTags || matchArchetype;
+                }
+                return true;
+              });
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[70vh] overflow-y-auto pr-1 custom-scrollbar">
+                  {displayStrategies.map((strat, i) => {
+                    const primarySymbol: SymbolId = (strat.assets && strat.assets[0] ? `${strat.assets[0]}USDT` : 'BTCUSDT') as SymbolId;
+                    const riskColor =
+                      strat.risk_level === 'conservative'
+                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                        : strat.risk_level === 'aggressive'
+                        ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                        : 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30';
+
+                    return (
+                      <div
+                        key={strat.id || i}
+                        className="bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] space-y-3 flex flex-col justify-between hover:border-cyan-500/50 transition-all shadow-md"
+                      >
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xl">{strat.emoji || '⚡'}</span>
+                              <span className={`text-[10px] px-2 py-0.5 rounded font-black border uppercase ${riskColor}`}>
+                                {strat.risk_level || 'MODERATE'}
+                              </span>
+                            </div>
+                            <span className="font-mono text-xs font-bold text-gray-300">
+                              {strat.direction ? strat.direction.toUpperCase() : 'LONG / SHORT'}
+                            </span>
+                          </div>
+
+                          <h4 className="text-sm font-bold text-white">{strat.name}</h4>
+                          <p className="text-xs text-gray-400 leading-relaxed line-clamp-2">{strat.tagline || strat.belief_plain}</p>
+
+                          <div className="grid grid-cols-3 gap-2 py-1 text-[11px] font-mono">
+                            <div className="p-1.5 bg-[#080E1A] rounded border border-gray-800">
+                              <span className="text-[9px] text-gray-500 block">Archetype</span>
+                              <strong className="text-cyan-400 text-[10px] truncate block">{strat.archetype_label || strat.group || 'Quant'}</strong>
+                            </div>
+                            <div className="p-1.5 bg-[#080E1A] rounded border border-gray-800">
+                              <span className="text-[9px] text-gray-500 block">Min Capital</span>
+                              <strong className="text-white">${strat.min_budget || 200}</strong>
+                            </div>
+                            <div className="p-1.5 bg-[#080E1A] rounded border border-gray-800">
+                              <span className="text-[9px] text-gray-500 block">Max Lev</span>
+                              <strong className="text-amber-400">{strat.leverage_max || 5}x</strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={async () => {
+                            try {
+                              const res = await fetch('/api/bot/state', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  action: 'CREATE',
+                                  config: {
+                                    name: strat.name,
+                                    symbol: primarySymbol,
+                                    allocatedCapital: strat.min_budget ? strat.min_budget * 5 : 2000,
+                                    cycleIntervalSeconds: strat.cadence_seconds || 30,
+                                    version: strat.version || 'v1.0',
+                                  },
+                                }),
+                              });
+                              if (res.ok) {
+                                fetchCloudBots();
+                                setActiveSection('overview');
+                              }
+                            } catch {}
+                          }}
+                          className="w-full py-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>1-Click Deploy to Cloud Bot</span>
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -810,6 +883,7 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
                       onClick={() => {
                         setSelectedStrategyId(strat.id);
                         if (onSelectSymbol) onSelectSymbol(strat.symbol);
+                        setShowMobileInspector(true);
                       }}
                       className={`cursor-pointer transition-colors ${
                         isSelected ? 'bg-blue-600/15 border-l-2 border-cyan-400' : 'hover:bg-gray-800/30'
@@ -960,12 +1034,38 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
         )}
       </div>
 
-      {/* Right Strategy Inspector */}
-      {selectedStrategy && (
-        <StrategyInspector
-          strategy={selectedStrategy}
-          onOpenFullDashboard={onNavigateDashboard}
-        />
+      {/* Right Strategy Inspector (Persistent on Desktop >= xl) */}
+      <div className="hidden xl:block shrink-0">
+        {selectedStrategy && (
+          <StrategyInspector
+            strategy={selectedStrategy}
+            onOpenFullDashboard={onNavigateDashboard}
+          />
+        )}
+      </div>
+
+      {/* ── MOBILE STRATEGY INSPECTOR MODAL (< xl) ── */}
+      {showMobileInspector && selectedStrategy && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-3 xl:hidden">
+          <div className="bg-[#080E1A] border border-gray-800 rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto custom-scrollbar p-4 shadow-2xl relative">
+            <div className="flex items-center justify-between pb-2 mb-2 border-b border-gray-800">
+              <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider">Strategy Inspector</span>
+              <button
+                onClick={() => setShowMobileInspector(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <StrategyInspector
+              strategy={selectedStrategy}
+              onOpenFullDashboard={() => {
+                setShowMobileInspector(false);
+                if (onNavigateDashboard) onNavigateDashboard();
+              }}
+            />
+          </div>
+        </div>
       )}
 
       {/* ── CREATE / SPAWN BOT MODAL ── */}

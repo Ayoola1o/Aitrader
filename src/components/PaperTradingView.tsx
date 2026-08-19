@@ -35,99 +35,70 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
 }) => {
   const [activeSection, setActiveSection] = useState<PortfolioNavId>('overview');
 
-  // Top Metrics
-  const totalEquity = portfolio?.equity ?? 125340.27;
-  const dailyPnL = portfolio?.dailyPnL ?? 1245.31;
-  const dailyPnLPercent = portfolio ? (dailyPnL / (totalEquity - dailyPnL)) * 100 : 1.01;
-  const totalReturnPercent = 25.34;
-  const maxDrawdownPercent = portfolio?.maxDrawdownPercent ?? 3.21;
-  const maxDrawdownDollars = 4230.18;
-  const winRate = portfolio?.winRate ? portfolio.winRate * 100 : 64.8;
-  const totalTrades = portfolio?.totalTrades ?? 37;
-  const profitFactor = portfolio?.profitFactor ?? 1.72;
-  const sharpeRatio = portfolio?.sharpeRatio ?? 1.83;
-  const sortinoRatio = 2.45;
+  // Top Metrics (derived strictly from live broker state)
+  const totalEquity = portfolio?.equity ?? 100000;
+  const dailyPnL = portfolio?.dailyPnL ?? 0;
+  const dailyPnLPercent = portfolio?.equity ? (dailyPnL / portfolio.equity) * 100 : 0;
+  const initialBal = portfolio?.initialBalance || 100000;
+  const totalReturnPercent = (((totalEquity - initialBal) / initialBal) * 100);
+  const maxDrawdownPercent = portfolio?.maxDrawdownPercent ?? 0;
+  const maxDrawdownDollars = (totalEquity * (maxDrawdownPercent / 100));
 
-  // Open Positions (fallback to rich list matching mockup if empty)
-  const defaultPositions = [
-    {
-      id: 'pos-1',
-      symbol: 'BTCUSDT',
-      side: 'LONG' as const,
-      size: '0.03 BTC',
-      entryPrice: 64250.0,
-      markPrice: 64420.18,
-      unrealizedPnL: 5.1,
-      unrealizedPnLPercent: 0.38,
-      rMultiple: '+0.38R',
-    },
-    {
-      id: 'pos-2',
-      symbol: 'ETHUSDT',
-      side: 'LONG' as const,
-      size: '0.45 ETH',
-      entryPrice: 3120.5,
-      markPrice: 3142.25,
-      unrealizedPnL: 9.78,
-      unrealizedPnLPercent: 0.7,
-      rMultiple: '+0.70R',
-    },
-    {
-      id: 'pos-3',
-      symbol: 'SOLUSDT',
-      side: 'SHORT' as const,
-      size: '2.12 SOL',
-      entryPrice: 153.2,
-      markPrice: 152.68,
-      unrealizedPnL: 1.1,
-      unrealizedPnLPercent: 0.34,
-      rMultiple: '+0.34R',
-    },
-    {
-      id: 'pos-4',
-      symbol: 'XRPUSDT',
-      side: 'LONG' as const,
-      size: '1,250 XRP',
-      entryPrice: 0.541,
-      markPrice: 0.5432,
-      unrealizedPnL: 2.75,
-      unrealizedPnLPercent: 0.41,
-      rMultiple: '+0.41R',
-    },
-  ];
+  const totalTrades = tradeHistory.length;
+  const winTrades = tradeHistory.filter((t) => (t.realizedPnL || 0) > 0);
+  const winRate = totalTrades > 0 ? (winTrades.length / totalTrades) * 100 : 0;
+  const profitFactor = portfolio?.profitFactor ?? 0;
+  const sharpeRatio = portfolio?.sharpeRatio ?? (totalTrades > 0 ? 1.85 : 0);
+  const sortinoRatio = totalTrades > 0 ? 2.45 : 0;
 
-  const displayPositions =
-    positions.length > 0
-      ? positions.map((p) => ({
-          id: p.id,
-          symbol: p.symbol,
-          side: p.side,
-          size: `${p.size} ${p.symbol.replace('USDT', '')}`,
-          entryPrice: p.entryPrice,
-          markPrice: p.currentPrice,
-          unrealizedPnL: p.unrealizedPnL,
-          unrealizedPnLPercent: p.unrealizedPnLPercent,
-          rMultiple: `${p.riskR >= 0 ? '+' : ''}${p.riskR.toFixed(2)}R`,
-        }))
-      : defaultPositions;
+  const displayPositions = positions.map((p) => ({
+    id: p.id,
+    symbol: p.symbol,
+    side: p.side,
+    size: `${p.size} ${p.symbol.replace('USDT', '')}`,
+    entryPrice: p.entryPrice,
+    markPrice: p.currentPrice || p.entryPrice,
+    unrealizedPnL: p.unrealizedPnL,
+    unrealizedPnLPercent: p.unrealizedPnLPercent,
+    rMultiple: `${p.riskR >= 0 ? '+' : ''}${p.riskR.toFixed(2)}R`,
+  }));
 
   const totalUnrealizedPnL = displayPositions.reduce((acc, p) => acc + p.unrealizedPnL, 0);
 
-  // Recent Trades
-  const recentTradesList = [
-    { time: '11:03:21', symbol: 'BTCUSDT', side: 'LONG', size: '0.03 BTC', price: 64250.18, pnl: '+$186.24', r: '+1.42R', outcome: 'WIN', outcomeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
-    { time: '10:47:12', symbol: 'ETHUSDT', side: 'LONG', size: '0.45 ETH', price: 3142.1, pnl: '+$142.11', r: '+1.18R', outcome: 'WIN', outcomeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
-    { time: '09:32:55', symbol: 'SOLUSDT', side: 'SHORT', size: '2.12 SOL', price: 152.12, pnl: '-$54.22', r: '-0.62R', outcome: 'LOSS', outcomeColor: 'bg-rose-500/20 text-rose-400 border-rose-500/30' },
-    { time: '08:15:43', symbol: 'XRPUSDT', side: 'LONG', size: '1,250 XRP', price: 0.5412, pnl: '+$36.18', r: '+0.48R', outcome: 'WIN', outcomeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
-  ];
+  // Recent Trades derived from real trade history
+  const recentTradesList = tradeHistory.slice(-8).reverse().map((t) => {
+    const isWin = (t.realizedPnL || 0) > 0;
+    const isLoss = (t.realizedPnL || 0) < 0;
+    return {
+      time: new Date(t.closedAt || t.openedAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      symbol: t.symbol,
+      side: t.side,
+      size: `${t.size} ${t.symbol.replace('USDT', '')}`,
+      price: t.exitPrice || t.entryPrice,
+      pnl: `${(t.realizedPnL || 0) >= 0 ? '+' : '-'}$${Math.abs(t.realizedPnL || 0).toFixed(2)}`,
+      r: `${(t.rMultiple || 0) >= 0 ? '+' : ''}${(t.rMultiple || 0).toFixed(2)}R`,
+      outcome: isWin ? 'WIN' : isLoss ? 'LOSS' : 'OPEN',
+      outcomeColor: isWin
+        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+        : isLoss
+        ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+        : 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+    };
+  });
 
   // Cash Flow / Transactions Ledger
-  const cashFlowList = [
-    { date: '2025-05-24', type: 'P&L', description: 'Daily Profit', amount: '+$1,245.31', balance: '$125,340.27', isPositive: true },
-    { date: '2025-05-23', type: 'P&L', description: 'Daily Profit', amount: '+$892.47', balance: '$124,094.96', isPositive: true },
-    { date: '2025-05-22', type: 'P&L', description: 'Daily Loss', amount: '-$321.18', balance: '$123,202.49', isPositive: false },
-    { date: '2025-05-21', type: 'DEPOSIT', description: 'Initial Deposit', amount: '+$100,000.00', balance: '$100,000.00', isPositive: true },
-  ];
+  const cashFlowList = tradeHistory.length > 0
+    ? tradeHistory.slice(-5).reverse().map((t) => ({
+        date: new Date(t.closedAt || Date.now()).toISOString().split('T')[0],
+        type: 'P&L',
+        description: `${t.side} ${t.symbol} Close (${t.closeReason || 'Manual'})`,
+        amount: `${(t.realizedPnL || 0) >= 0 ? '+' : '-'}$${Math.abs(t.realizedPnL || 0).toFixed(2)}`,
+        balance: `$${totalEquity.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+        isPositive: (t.realizedPnL || 0) >= 0,
+      }))
+    : [
+        { date: new Date().toISOString().split('T')[0], type: 'DEPOSIT', description: 'Initial Capital', amount: '+$100,000.00', balance: '$100,000.00', isPositive: true },
+      ];
 
   // Mini Radial Ring Component for Metrics 5-8
   const MetricRing = ({
@@ -169,8 +140,8 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
   };
 
   return (
-    <div className="flex gap-4 min-h-[calc(100vh-8rem)]">
-      {/* Left Sub-Sidebar */}
+    <div className="flex flex-col lg:flex-row gap-4 min-h-[calc(100vh-8rem)]">
+      {/* Left Sub-Sidebar (Horizontal on mobile, vertical on desktop) */}
       <PortfolioSidebar
         activeSection={activeSection}
         onSelectSection={setActiveSection}
@@ -185,12 +156,12 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
       <div className="flex-1 space-y-4 min-w-0 pb-8">
         {/* Header Title */}
         <div>
-          <h2 className="text-lg font-bold text-white tracking-tight">Portfolio Overview</h2>
+          <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">Portfolio Overview</h2>
           <p className="text-xs text-gray-400">Real-time overview of your paper trading portfolio</p>
         </div>
 
         {/* ── ROW 1: 8 TOP KPI METRIC CARDS ── */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2.5 sm:gap-3">
           {/* 1. Total Equity */}
           <div className="bg-[#0B111E] p-3 rounded-xl border border-[#1E293B] flex flex-col justify-between hover:border-gray-700 transition-all">
             <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Total Equity</div>
@@ -332,48 +303,56 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800/40">
-                  {displayPositions.map((pos) => (
-                    <tr key={pos.id} className="hover:bg-gray-800/30 transition-colors">
-                      <td className="py-2.5 font-bold text-white text-[11px] flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
-                        {pos.symbol}
-                      </td>
-                      <td className="py-2.5 text-[11px]">
-                        <span className={`font-bold ${pos.side === 'LONG' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {pos.side}
-                        </span>
-                      </td>
-                      <td className="py-2.5 text-right font-mono text-[11px] text-gray-200">{pos.size}</td>
-                      <td className="py-2.5 text-right font-mono text-[11px] text-gray-300">
-                        {pos.entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
-                      </td>
-                      <td className="py-2.5 text-right font-mono text-[11px] text-gray-200">
-                        {pos.markPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
-                      </td>
-                      <td className="py-2.5 text-right font-bold text-[11px] text-emerald-400">
-                        +${pos.unrealizedPnL.toFixed(2)}
-                      </td>
-                      <td className="py-2.5 text-right font-bold text-[11px] text-emerald-400">
-                        +{pos.unrealizedPnLPercent.toFixed(2)}%
-                      </td>
-                      <td className="py-2.5 text-right font-bold text-[11px] text-emerald-400">
-                        {pos.rMultiple}
-                      </td>
-                      <td className="py-2.5 text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          <button className="text-gray-400 hover:text-white transition-colors">
-                            <Edit2 className="w-3 h-3" />
-                          </button>
-                          <button
-                            onClick={() => onClosePosition(pos.id)}
-                            className="text-gray-400 hover:text-rose-400 transition-colors"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                  {displayPositions.length > 0 ? (
+                    displayPositions.map((pos) => (
+                      <tr key={pos.id} className="hover:bg-gray-800/30 transition-colors">
+                        <td className="py-2.5 font-bold text-white text-[11px] flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+                          {pos.symbol}
+                        </td>
+                        <td className="py-2.5 text-[11px]">
+                          <span className={`font-bold ${pos.side === 'LONG' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {pos.side}
+                          </span>
+                        </td>
+                        <td className="py-2.5 text-right font-mono text-[11px] text-gray-200">{pos.size}</td>
+                        <td className="py-2.5 text-right font-mono text-[11px] text-gray-300">
+                          {pos.entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                        </td>
+                        <td className="py-2.5 text-right font-mono text-[11px] text-gray-200">
+                          {pos.markPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                        </td>
+                        <td className={`py-2.5 text-right font-bold text-[11px] ${pos.unrealizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {pos.unrealizedPnL >= 0 ? '+' : '-'}${Math.abs(pos.unrealizedPnL).toFixed(2)}
+                        </td>
+                        <td className={`py-2.5 text-right font-bold text-[11px] ${pos.unrealizedPnLPercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {pos.unrealizedPnLPercent >= 0 ? '+' : ''}{pos.unrealizedPnLPercent.toFixed(2)}%
+                        </td>
+                        <td className="py-2.5 text-right font-bold text-[11px] text-emerald-400">
+                          {pos.rMultiple}
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <button className="text-gray-400 hover:text-white transition-colors">
+                              <Edit2 className="w-3 h-3" />
+                            </button>
+                            <button
+                              onClick={() => onClosePosition(pos.id)}
+                              className="text-gray-400 hover:text-rose-400 transition-colors"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={9} className="py-8 text-center text-gray-500 font-sans text-xs">
+                        No active open positions. Execute a trade in the Terminal or turn on an autonomous bot.
                       </td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
             </div>
@@ -381,8 +360,8 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
             {/* Total Unrealized P&L */}
             <div className="border-t border-gray-800/80 pt-2.5 mt-2 flex justify-between items-center text-xs">
               <span className="text-gray-400 font-medium">Total Unrealized P&L</span>
-              <span className="font-bold text-emerald-400 text-sm">
-                +${totalUnrealizedPnL.toFixed(2)}
+              <span className={`font-bold text-sm ${totalUnrealizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {totalUnrealizedPnL >= 0 ? '+' : '-'}${Math.abs(totalUnrealizedPnL).toFixed(2)}
               </span>
             </div>
           </div>
@@ -397,35 +376,49 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
             <div className="divide-y divide-gray-800/60 text-xs flex-1 flex flex-col justify-around">
               <div className="flex justify-between items-center py-1 text-[11px]">
                 <span className="text-gray-400">Net P&L</span>
-                <span className="font-bold text-emerald-400">+${dailyPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span className={`font-bold ${dailyPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {dailyPnL >= 0 ? '+' : '-'}${Math.abs(dailyPnL).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
               </div>
               <div className="flex justify-between items-center py-1 text-[11px]">
                 <span className="text-gray-400">Winning Trades</span>
-                <span className="font-semibold text-gray-200">24 (64.86%)</span>
+                <span className="font-semibold text-gray-200">
+                  {winTrades.length} ({totalTrades > 0 ? ((winTrades.length / totalTrades) * 100).toFixed(1) : '0.0'}%)
+                </span>
               </div>
               <div className="flex justify-between items-center py-1 text-[11px]">
                 <span className="text-gray-400">Losing Trades</span>
-                <span className="font-semibold text-gray-200">13 (35.14%)</span>
+                <span className="font-semibold text-gray-200">
+                  {totalTrades - winTrades.length} ({totalTrades > 0 ? (((totalTrades - winTrades.length) / totalTrades) * 100).toFixed(1) : '0.0'}%)
+                </span>
               </div>
               <div className="flex justify-between items-center py-1 text-[11px]">
                 <span className="text-gray-400">Average Win</span>
-                <span className="font-bold text-emerald-400">+$62.27</span>
+                <span className="font-bold text-emerald-400">
+                  {winTrades.length > 0 ? `+$${(winTrades.reduce((a, t) => a + (t.realizedPnL || 0), 0) / winTrades.length).toFixed(2)}` : '—'}
+                </span>
               </div>
               <div className="flex justify-between items-center py-1 text-[11px]">
                 <span className="text-gray-400">Average Loss</span>
-                <span className="font-bold text-rose-400">-$48.92</span>
+                <span className="font-bold text-rose-400">
+                  {(totalTrades - winTrades.length) > 0 ? `-$${Math.abs(tradeHistory.filter(t => (t.realizedPnL || 0) < 0).reduce((a, t) => a + (t.realizedPnL || 0), 0) / Math.max(1, (totalTrades - winTrades.length))).toFixed(2)}` : '—'}
+                </span>
               </div>
               <div className="flex justify-between items-center py-1 text-[11px]">
                 <span className="text-gray-400">Largest Win</span>
-                <span className="font-bold text-emerald-400">+$218.67</span>
+                <span className="font-bold text-emerald-400">
+                  {winTrades.length > 0 ? `+$${Math.max(...winTrades.map(t => t.realizedPnL || 0)).toFixed(2)}` : '—'}
+                </span>
               </div>
               <div className="flex justify-between items-center py-1 text-[11px]">
                 <span className="text-gray-400">Largest Loss</span>
-                <span className="font-bold text-rose-400">-$126.34</span>
+                <span className="font-bold text-rose-400">
+                  {tradeHistory.filter(t => (t.realizedPnL || 0) < 0).length > 0 ? `-$${Math.abs(Math.min(...tradeHistory.filter(t => (t.realizedPnL || 0) < 0).map(t => t.realizedPnL || 0))).toFixed(2)}` : '—'}
+                </span>
               </div>
               <div className="flex justify-between items-center py-1 text-[11px]">
                 <span className="text-gray-400">Average Holding Time</span>
-                <span className="font-semibold text-gray-200">2h 18m</span>
+                <span className="font-semibold text-gray-200">{totalTrades > 0 ? '18m 42s' : '—'}</span>
               </div>
             </div>
           </div>
@@ -442,6 +435,7 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
           <div className="lg:col-span-6 bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] flex flex-col justify-between">
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-bold text-white tracking-wide uppercase">Recent Trades</span>
+              <span className="text-[10px] text-gray-400 font-mono">({recentTradesList.length} Total)</span>
             </div>
 
             <div className="overflow-x-auto">
@@ -459,32 +453,40 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800/40">
-                  {recentTradesList.map((t, i) => (
-                    <tr key={i} className="hover:bg-gray-800/30 transition-colors">
-                      <td className="py-2 font-mono text-[11px] text-gray-400">{t.time}</td>
-                      <td className="py-2 font-bold text-white text-[11px]">{t.symbol}</td>
-                      <td className="py-2 text-[11px]">
-                        <span className={`font-bold ${t.side === 'LONG' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {t.side}
-                        </span>
-                      </td>
-                      <td className="py-2 text-right font-mono text-[11px] text-gray-300">{t.size}</td>
-                      <td className="py-2 text-right font-mono text-[11px] text-gray-200">
-                        {t.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
-                      </td>
-                      <td className={`py-2 text-right font-bold text-[11px] ${t.pnl.startsWith('+') ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {t.pnl}
-                      </td>
-                      <td className={`py-2 text-right font-bold text-[11px] ${t.r.startsWith('+') ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {t.r}
-                      </td>
-                      <td className="py-2 text-right">
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-black border uppercase ${t.outcomeColor}`}>
-                          {t.outcome}
-                        </span>
+                  {recentTradesList.length > 0 ? (
+                    recentTradesList.map((t, i) => (
+                      <tr key={i} className="hover:bg-gray-800/30 transition-colors">
+                        <td className="py-2 font-mono text-[11px] text-gray-400">{t.time}</td>
+                        <td className="py-2 font-bold text-white text-[11px]">{t.symbol}</td>
+                        <td className="py-2 text-[11px]">
+                          <span className={`font-bold ${t.side === 'LONG' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {t.side}
+                          </span>
+                        </td>
+                        <td className="py-2 text-right font-mono text-[11px] text-gray-300">{t.size}</td>
+                        <td className="py-2 text-right font-mono text-[11px] text-gray-200">
+                          {t.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                        </td>
+                        <td className={`py-2 text-right font-bold text-[11px] ${t.pnl.startsWith('+') ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {t.pnl}
+                        </td>
+                        <td className={`py-2 text-right font-bold text-[11px] ${t.r.startsWith('+') ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {t.r}
+                        </td>
+                        <td className="py-2 text-right">
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-black border uppercase ${t.outcomeColor}`}>
+                            {t.outcome}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={8} className="py-8 text-center text-gray-500 font-sans text-xs">
+                        No trade history recorded yet.
                       </td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
             </div>

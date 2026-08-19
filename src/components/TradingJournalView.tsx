@@ -29,68 +29,7 @@ interface JournalEntry extends TradeHistoryItem {
   aiConfidence?: number;
 }
 
-const DEFAULT_JOURNAL_ITEMS: JournalEntry[] = [
-  {
-    id: 'TRD-20268818-001',
-    symbol: 'BTCUSDT',
-    side: 'LONG',
-    entryPrice: 63850,
-    exitPrice: 64720,
-    size: 0.35,
-    realizedPnL: 304.5,
-    realizedPnLPercent: 1.36,
-    fee: 4.5,
-    slippage: 0.8,
-    rMultiple: 2.4,
-    closeReason: 'TAKE_PROFIT',
-    openedAt: Date.now() - 3600000 * 5,
-    closedAt: Date.now() - 3600000 * 3,
-    regime: 'BULLISH',
-    aiConfidence: 0.84,
-    tags: ['EMA_BREAKOUT', 'VWAP_SUPPORT', 'AI_FUSION'],
-    notes: 'Clean bounce off the 1h VWAP with multi-agent consensus (Technical + Order Flow). Hit TP precisely at upper resistance band.',
-  },
-  {
-    id: 'TRD-20268818-002',
-    symbol: 'ETHUSDT',
-    side: 'LONG',
-    entryPrice: 3410,
-    exitPrice: 3495,
-    size: 3.2,
-    realizedPnL: 272.0,
-    realizedPnLPercent: 2.49,
-    fee: 3.2,
-    slippage: 0.5,
-    rMultiple: 2.8,
-    closeReason: 'TAKE_PROFIT',
-    openedAt: Date.now() - 3600000 * 8,
-    closedAt: Date.now() - 3600000 * 6,
-    regime: 'BULLISH',
-    aiConfidence: 0.78,
-    tags: ['MOMENTUM_SWEEP', 'HIGH_VOLUME'],
-    notes: 'Strong volume expansion on 15m breakout. Followed momentum specialist signal.',
-  },
-  {
-    id: 'TRD-20268818-003',
-    symbol: 'SOLUSDT',
-    side: 'SHORT',
-    entryPrice: 147.8,
-    exitPrice: 149.2,
-    size: 15.0,
-    realizedPnL: -21.0,
-    realizedPnLPercent: -0.95,
-    fee: 1.2,
-    slippage: 0.2,
-    rMultiple: -1.0,
-    closeReason: 'STOP_LOSS',
-    openedAt: Date.now() - 3600000 * 12,
-    closedAt: Date.now() - 3600000 * 11,
-    regime: 'VOLATILE',
-    aiConfidence: 0.59,
-    tags: ['LIQUIDITY_FADE', 'STOPPED_OUT'],
-    notes: 'Attempted fade at local resistance, stopped out quickly by deterministic risk gate. Small loss kept risk well within 1R.',
-  },
-];
+const DEFAULT_JOURNAL_ITEMS: JournalEntry[] = [];
 
 export const TradingJournalView: React.FC<TradingJournalViewProps> = ({
   tradeHistory = [],
@@ -100,17 +39,16 @@ export const TradingJournalView: React.FC<TradingJournalViewProps> = ({
   const [search, setSearch] = useState('');
   const [filterOutcome, setFilterOutcome] = useState<'ALL' | 'WIN' | 'LOSS'>('ALL');
   const [selectedEntry, setSelectedEntry] = useState<JournalEntry | null>(null);
-  const [entries, setEntries] = useState<JournalEntry[]>(DEFAULT_JOURNAL_ITEMS);
+  const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [newNoteText, setNewNoteText] = useState('');
 
-  // Merge live tradeHistory into entries
+  // Map live tradeHistory into journal entries
   const allEntries = useMemo(() => {
-    if (tradeHistory.length === 0) return entries;
-    const historyMapped: JournalEntry[] = tradeHistory.map((t, idx) => ({
+    const historyMapped: JournalEntry[] = tradeHistory.map((t) => ({
       ...t,
-      regime: 'BULLISH',
+      regime: 'ACTIVE_MARKET',
       aiConfidence: 0.75,
-      tags: [t.closeReason, t.side === 'LONG' ? 'BULL_SETUP' : 'BEAR_SETUP'],
+      tags: [t.closeReason || 'CLOSED', t.side === 'LONG' ? 'BULL_SETUP' : 'BEAR_SETUP'],
       notes: t.realizedPnL >= 0 ? 'Executed via AI Specialist Agent Loop with take-profit exit.' : 'Closed per deterministic risk management rules.',
     }));
     return [...historyMapped, ...entries.filter(e => !tradeHistory.some(t => t.id === e.id))];
@@ -185,89 +123,99 @@ export const TradingJournalView: React.FC<TradingJournalViewProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Entries List */}
         <div className="lg:col-span-2 space-y-3">
-          {filteredEntries.map((item) => {
-            const isWin = item.realizedPnL >= 0;
-            const isSelected = selectedEntry?.id === item.id;
+          {filteredEntries.length > 0 ? (
+            filteredEntries.map((item) => {
+              const isWin = item.realizedPnL >= 0;
+              const isSelected = selectedEntry?.id === item.id;
 
-            return (
-              <div
-                key={item.id}
-                onClick={() => {
-                  setSelectedEntry(item);
-                  setNewNoteText(item.notes || '');
-                }}
-                className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                  isSelected
-                    ? 'bg-[#0F172A] border-cyan-500 shadow-lg shadow-cyan-500/10'
-                    : 'bg-[#0B111E] border-[#1E293B] hover:border-gray-700'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-white text-sm">{item.symbol}</span>
-                    <span
-                      className={`text-[9px] px-2 py-0.5 rounded font-black border ${
-                        item.side === 'LONG'
-                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                          : 'bg-rose-500/20 text-rose-400 border-rose-500/30'
-                      }`}
-                    >
-                      {item.side}
-                    </span>
-                    <span className="text-[10px] text-gray-400 font-mono">
-                      {new Date(item.closedAt).toLocaleDateString()} {new Date(item.closedAt).toLocaleTimeString()}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2 font-mono font-bold text-sm">
-                    <span className={isWin ? 'text-emerald-400' : 'text-rose-400'}>
-                      {isWin ? '+' : ''}${item.realizedPnL.toFixed(2)}
-                    </span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-black ${isWin ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
-                      {item.rMultiple ? `${item.rMultiple > 0 ? '+' : ''}${item.rMultiple}R` : isWin ? '+2.0R' : '-1.0R'}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-4 gap-2 my-2.5 py-2 px-3 bg-[#080E1A] rounded-lg border border-gray-800 text-[11px] font-mono">
-                  <div>
-                    <span className="text-gray-500 block text-[9px]">Entry</span>
-                    <span className="text-gray-200 font-bold">${item.entryPrice.toLocaleString()}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500 block text-[9px]">Exit</span>
-                    <span className="text-gray-200 font-bold">${item.exitPrice.toLocaleString()}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500 block text-[9px]">Size</span>
-                    <span className="text-gray-200 font-bold">{item.size}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500 block text-[9px]">Exit Reason</span>
-                    <span className={`font-bold ${item.closeReason === 'TAKE_PROFIT' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {item.closeReason}
-                    </span>
-                  </div>
-                </div>
-
-                {item.notes && (
-                  <p className="text-xs text-gray-300 mt-1 line-clamp-2 italic">
-                    "{item.notes}"
-                  </p>
-                )}
-
-                {item.tags && item.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {item.tags.map((t, idx) => (
-                      <span key={idx} className="text-[9px] px-2 py-0.5 rounded-full bg-blue-500/10 text-cyan-400 border border-blue-500/20 font-bold">
-                        #{t}
+              return (
+                <div
+                  key={item.id}
+                  onClick={() => {
+                    setSelectedEntry(item);
+                    setNewNoteText(item.notes || '');
+                  }}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                    isSelected
+                      ? 'bg-[#0F172A] border-cyan-500 shadow-lg shadow-cyan-500/10'
+                      : 'bg-[#0B111E] border-[#1E293B] hover:border-gray-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-white text-sm">{item.symbol}</span>
+                      <span
+                        className={`text-[9px] px-2 py-0.5 rounded font-black border ${
+                          item.side === 'LONG'
+                            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                            : 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                        }`}
+                      >
+                        {item.side}
                       </span>
-                    ))}
+                      <span className="text-[10px] text-gray-400 font-mono">
+                        {new Date(item.closedAt).toLocaleDateString()} {new Date(item.closedAt).toLocaleTimeString()}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 font-mono font-bold text-sm">
+                      <span className={isWin ? 'text-emerald-400' : 'text-rose-400'}>
+                        {isWin ? '+' : ''}${item.realizedPnL.toFixed(2)}
+                      </span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-black ${isWin ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
+                        {item.rMultiple ? `${item.rMultiple > 0 ? '+' : ''}${item.rMultiple}R` : isWin ? '+2.0R' : '-1.0R'}
+                      </span>
+                    </div>
                   </div>
-                )}
-              </div>
-            );
-          })}
+
+                  <div className="grid grid-cols-4 gap-2 my-2.5 py-2 px-3 bg-[#080E1A] rounded-lg border border-gray-800 text-[11px] font-mono">
+                    <div>
+                      <span className="text-gray-500 block text-[9px]">Entry</span>
+                      <span className="text-gray-200 font-bold">${item.entryPrice.toLocaleString()}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 block text-[9px]">Exit</span>
+                      <span className="text-gray-200 font-bold">${item.exitPrice.toLocaleString()}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 block text-[9px]">Size</span>
+                      <span className="text-gray-200 font-bold">{item.size}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 block text-[9px]">Exit Reason</span>
+                      <span className={`font-bold ${item.closeReason === 'TAKE_PROFIT' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {item.closeReason}
+                      </span>
+                    </div>
+                  </div>
+
+                  {item.notes && (
+                    <p className="text-xs text-gray-300 mt-1 line-clamp-2 italic">
+                      "{item.notes}"
+                    </p>
+                  )}
+
+                  {item.tags && item.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {item.tags.map((t, idx) => (
+                        <span key={idx} className="text-[9px] px-2 py-0.5 rounded-full bg-blue-500/10 text-cyan-400 border border-blue-500/20 font-bold">
+                          #{t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          ) : (
+            <div className="p-12 text-center bg-[#0B111E] rounded-xl border border-[#1E293B] flex flex-col items-center justify-center">
+              <BookOpen className="w-8 h-8 text-gray-600 mb-2" />
+              <span className="text-sm font-bold text-gray-300">No Journal Entries Found</span>
+              <p className="text-xs text-gray-500 mt-1 max-w-sm">
+                Autonomous bot trades and manual terminal executions will automatically log telemetry, timestamps, and execution notes here.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Selected Entry Detail & Notes Editor */}

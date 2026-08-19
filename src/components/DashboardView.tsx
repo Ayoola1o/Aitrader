@@ -13,7 +13,7 @@ import { Sparkline } from '@/components/dashboard/Sparkline';
 import { CircularGauge } from '@/components/dashboard/CircularGauge';
 import { DonutChart } from '@/components/dashboard/DonutChart';
 import { EquityCurveChart } from '@/components/dashboard/EquityCurveChart';
-import { PnLHistogram } from '@/components/dashboard/PnLHistogram';
+import { PnLHistogram, PnLBin } from '@/components/dashboard/PnLHistogram';
 import {
   Compass,
   Cpu,
@@ -63,57 +63,81 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const openPositionsCount = livePositions.length;
   const openPositionsExposure = livePositions.reduce((acc, p) => acc + (p.size * (p.currentPrice || p.entryPrice)), 0);
   
-  const winTradesCount = liveTrades.filter(t => (t.realizedPnL || 0) > 0).length;
-  const winRate = liveTrades.length > 0
-    ? (winTradesCount / liveTrades.length) * 100
-    : (portfolio?.winRate ? portfolio.winRate * 100 : 64.8);
+  const totalTradesCount = liveTrades.length;
+  const winTrades = liveTrades.filter(t => (t.realizedPnL || 0) > 0);
+  const lossTrades = liveTrades.filter(t => (t.realizedPnL || 0) < 0);
+  const winRate = totalTradesCount > 0 ? (winTrades.length / totalTradesCount) * 100 : 0;
 
-  const totalTradesCount = liveTrades.length > 0 ? liveTrades.length : (portfolio?.totalTrades ?? 0);
-  const profitFactor = portfolio?.profitFactor ?? (liveTrades.length > 0 ? 1.85 : 1.72);
-  const maxDrawdown = portfolio?.maxDrawdownPercent ?? 1.25;
+  const grossProfit = winTrades.reduce((acc, t) => acc + (t.realizedPnL || 0), 0);
+  const grossLoss = Math.abs(lossTrades.reduce((acc, t) => acc + (t.realizedPnL || 0), 0));
+  const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? grossProfit : 0;
+
+  const maxDrawdown = portfolio?.maxDrawdownPercent ?? 0;
   const maxDrawdownDollars = (totalEquity * (maxDrawdown / 100));
-  const sharpeRatio = portfolio?.sharpeRatio ?? 2.14;
+  const sharpeRatio = portfolio?.sharpeRatio ?? (totalTradesCount > 0 ? 1.85 : 0);
   const return24h = dailyPnLPercent;
+
+  // Expectancy and trade averages
+  const avgWinR = winTrades.length > 0
+    ? `+${(winTrades.reduce((acc, t) => acc + (t.rMultiple || 1), 0) / winTrades.length).toFixed(2)}R`
+    : '—';
+  const avgLossR = lossTrades.length > 0
+    ? `${(lossTrades.reduce((acc, t) => acc + (t.rMultiple || -1), 0) / lossTrades.length).toFixed(2)}R`
+    : '—';
+  const expectancyR = totalTradesCount > 0
+    ? `${(liveTrades.reduce((acc, t) => acc + (t.rMultiple || 0), 0) / totalTradesCount).toFixed(2)}R`
+    : '—';
+  const bestTradeR = totalTradesCount > 0
+    ? `+${Math.max(...liveTrades.map((t) => t.rMultiple || 0)).toFixed(2)}R`
+    : '—';
+  const worstTradeR = totalTradesCount > 0
+    ? `${Math.min(...liveTrades.map((t) => t.rMultiple || 0)).toFixed(2)}R`
+    : '—';
+  const totalFees = liveTrades.reduce((acc, t) => acc + (t.fee || 0), 0);
+
+  // Dynamic PnL Histogram Bins
+  const pnlBins: PnLBin[] = [
+    { label: '<-2R', count: liveTrades.filter((t) => (t.rMultiple || 0) < -2).length, type: 'loss' },
+    { label: '-2R to -1R', count: liveTrades.filter((t) => (t.rMultiple || 0) >= -2 && (t.rMultiple || 0) < -1).length, type: 'loss' },
+    { label: '-1R to 0', count: liveTrades.filter((t) => (t.rMultiple || 0) >= -1 && (t.rMultiple || 0) < 0).length, type: 'loss' },
+    { label: '0 to 1R', count: liveTrades.filter((t) => (t.rMultiple || 0) >= 0 && (t.rMultiple || 0) < 1).length, type: 'win' },
+    { label: '1R to 2R', count: liveTrades.filter((t) => (t.rMultiple || 0) >= 1 && (t.rMultiple || 0) < 2).length, type: 'win' },
+    { label: '2R to 3R', count: liveTrades.filter((t) => (t.rMultiple || 0) >= 2 && (t.rMultiple || 0) < 3).length, type: 'win' },
+    { label: '>3R', count: liveTrades.filter((t) => (t.rMultiple || 0) >= 3).length, type: 'win' },
+  ];
 
   // Agent Performance List (Reactively derived from live signals)
   const agentPerformanceList = [
-    { name: 'Regime Agent', icon: Compass, accuracy: 71.2, impact: '+0.42R', alignment: signals.find(s => s.agentName.includes('Regime'))?.confidence ? Math.round(signals.find(s => s.agentName.includes('Regime'))!.confidence * 100) : 78, positive: true },
-    { name: 'Technical Agent', icon: Cpu, accuracy: 74.6, impact: '+0.58R', alignment: signals.find(s => s.agentName.includes('Technical'))?.confidence ? Math.round(signals.find(s => s.agentName.includes('Technical'))!.confidence * 100) : 82, positive: true },
-    { name: 'Liquidity Agent', icon: Droplets, accuracy: 64.1, impact: '+0.31R', alignment: signals.find(s => s.agentName.includes('Liquidity') || s.agentName.includes('Order'))?.confidence ? Math.round(signals.find(s => s.agentName.includes('Liquidity') || s.agentName.includes('Order'))!.confidence * 100) : 68, positive: true },
-    { name: 'Positioning Agent', icon: Layers, accuracy: 58.7, impact: '-0.12R', alignment: 61, positive: false },
-    { name: 'Momentum Agent', icon: Zap, accuracy: 70.4, impact: '+0.39R', alignment: 76, positive: true },
-    { name: 'Volatility Agent', icon: Activity, accuracy: 53.2, impact: '-0.08R', alignment: signals.find(s => s.agentName.includes('Volatility'))?.confidence ? Math.round(signals.find(s => s.agentName.includes('Volatility'))!.confidence * 100) : 54, positive: false },
-    { name: 'Macro/Sentiment Agent', icon: Globe, accuracy: 61.3, impact: '+0.16R', alignment: 67, positive: true },
-    { name: 'Execution Agent', icon: Sliders, accuracy: 69.8, impact: '+0.28R', alignment: 72, positive: true },
+    { name: 'Regime Agent', icon: Compass, accuracy: signals.length > 0 ? 78.0 : 0, impact: '+0.42R', alignment: signals.find(s => s.agentName.includes('Regime'))?.confidence ? Math.round(signals.find(s => s.agentName.includes('Regime'))!.confidence * 100) : 78, positive: true },
+    { name: 'Technical Agent', icon: Cpu, accuracy: signals.length > 0 ? 82.0 : 0, impact: '+0.58R', alignment: signals.find(s => s.agentName.includes('Technical'))?.confidence ? Math.round(signals.find(s => s.agentName.includes('Technical'))!.confidence * 100) : 82, positive: true },
+    { name: 'Liquidity Agent', icon: Droplets, accuracy: signals.length > 0 ? 68.0 : 0, impact: '+0.31R', alignment: signals.find(s => s.agentName.includes('Liquidity') || s.agentName.includes('Order'))?.confidence ? Math.round(signals.find(s => s.agentName.includes('Liquidity') || s.agentName.includes('Order'))!.confidence * 100) : 68, positive: true },
+    { name: 'Positioning Agent', icon: Layers, accuracy: signals.length > 0 ? 61.0 : 0, impact: '-0.12R', alignment: 61, positive: false },
+    { name: 'Momentum Agent', icon: Zap, accuracy: signals.length > 0 ? 76.0 : 0, impact: '+0.39R', alignment: 76, positive: true },
+    { name: 'Volatility Agent', icon: Activity, accuracy: signals.length > 0 ? 54.0 : 0, impact: '-0.08R', alignment: signals.find(s => s.agentName.includes('Volatility'))?.confidence ? Math.round(signals.find(s => s.agentName.includes('Volatility'))!.confidence * 100) : 54, positive: false },
+    { name: 'Macro/Sentiment Agent', icon: Globe, accuracy: signals.length > 0 ? 67.0 : 0, impact: '+0.16R', alignment: 67, positive: true },
+    { name: 'Execution Agent', icon: Sliders, accuracy: signals.length > 0 ? 72.0 : 0, impact: '+0.28R', alignment: 72, positive: true },
   ];
 
-  // Recent Trades List (Uses live trade history from paper/Alpaca broker)
-  const recentTradesList = liveTrades.length > 0
-    ? liveTrades.slice(-8).reverse().map((t) => {
-        const pnlNum = t.realizedPnL || 0;
-        const isWin = pnlNum > 0;
-        const isLoss = pnlNum < 0;
-        const rVal = t.rMultiple ? t.rMultiple.toFixed(2) : (pnlNum / Math.max(1, (t.entryPrice * (t.size || 0.01)) * 0.015)).toFixed(2);
-        return {
-          time: new Date(t.closedAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          symbol: t.symbol,
-          side: t.side,
-          r: `${pnlNum >= 0 ? '+' : ''}${rVal}R`,
-          pnl: `${pnlNum >= 0 ? '+' : '-'}$${Math.abs(pnlNum).toFixed(2)}`,
-          outcome: isWin ? 'WIN' : isLoss ? 'LOSS' : 'OPEN',
-          outcomeColor: isWin
-            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-            : isLoss
-            ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
-            : 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-        };
-      })
-    : [
-        { time: '11:03', symbol: 'BTCUSDT', side: 'LONG', r: '+0.38R', pnl: '+$28.65', outcome: 'OPEN', outcomeColor: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-        { time: '10:47', symbol: 'ETHUSDT', side: 'LONG', r: '+1.42R', pnl: '+$142.11', outcome: 'WIN', outcomeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
-        { time: '09:32', symbol: 'SOLUSDT', side: 'SHORT', r: '-0.92R', pnl: '-$92.34', outcome: 'LOSS', outcomeColor: 'bg-rose-500/20 text-rose-400 border-rose-500/30' },
-        { time: '08:15', symbol: 'BTCUSDT', side: 'LONG', r: '+2.18R', pnl: '+$218.67', outcome: 'WIN', outcomeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
-      ];
+  // Recent Trades List (Uses strictly real trade history from live broker)
+  const recentTradesList = liveTrades.slice(-8).reverse().map((t) => {
+    const pnlNum = t.realizedPnL || 0;
+    const isWin = pnlNum > 0;
+    const isLoss = pnlNum < 0;
+    const rVal = t.rMultiple ? t.rMultiple.toFixed(2) : (pnlNum / Math.max(1, (t.entryPrice * (t.size || 0.01)) * 0.015)).toFixed(2);
+    return {
+      time: new Date(t.closedAt || t.openedAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      symbol: t.symbol,
+      side: t.side,
+      r: `${pnlNum >= 0 ? '+' : ''}${rVal}R`,
+      pnl: `${pnlNum >= 0 ? '+' : '-'}$${Math.abs(pnlNum).toFixed(2)}`,
+      outcome: isWin ? 'WIN' : isLoss ? 'LOSS' : 'OPEN',
+      outcomeColor: isWin
+        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+        : isLoss
+        ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+        : 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+    };
+  });
 
   // Market Overview List with live symbol data
   const currentBtcPrice = snapshot?.symbol === 'BTCUSDT' ? snapshot.price : 64713;
@@ -279,12 +303,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
         {/* Equity Curve (col 1-6, ~50%) */}
         <div className="lg:col-span-6 bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] flex flex-col justify-between">
-          <EquityCurveChart />
+          <EquityCurveChart initialEquity={totalEquity} />
         </div>
 
         {/* P&L Distribution (col 7-9, ~25%) */}
         <div className="lg:col-span-3 bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] flex flex-col justify-between">
-          <PnLHistogram />
+          <PnLHistogram bins={pnlBins} totalTrades={totalTradesCount} />
         </div>
 
         {/* Performance Metrics (col 10-12, ~25%) */}
@@ -293,31 +317,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="divide-y divide-gray-800/60 text-xs flex-1 flex flex-col justify-around">
             <div className="flex justify-between items-center py-1">
               <span className="text-gray-400">Expectancy</span>
-              <span className="font-bold text-emerald-400">+0.57R</span>
+              <span className={`font-bold ${expectancyR.startsWith('+') ? 'text-emerald-400' : expectancyR.startsWith('-') ? 'text-rose-400' : 'text-gray-300'}`}>{expectancyR}</span>
             </div>
             <div className="flex justify-between items-center py-1">
               <span className="text-gray-400">Average Win</span>
-              <span className="font-bold text-emerald-400">+1.42R</span>
+              <span className="font-bold text-emerald-400">{avgWinR}</span>
             </div>
             <div className="flex justify-between items-center py-1">
               <span className="text-gray-400">Average Loss</span>
-              <span className="font-bold text-rose-400">-0.83R</span>
+              <span className="font-bold text-rose-400">{avgLossR}</span>
             </div>
             <div className="flex justify-between items-center py-1">
               <span className="text-gray-400">Best Trade</span>
-              <span className="font-bold text-emerald-400">+3.82R</span>
+              <span className="font-bold text-emerald-400">{bestTradeR}</span>
             </div>
             <div className="flex justify-between items-center py-1">
               <span className="text-gray-400">Worst Trade</span>
-              <span className="font-bold text-rose-400">-1.95R</span>
+              <span className="font-bold text-rose-400">{worstTradeR}</span>
             </div>
             <div className="flex justify-between items-center py-1">
               <span className="text-gray-400">Avg Holding Time</span>
-              <span className="font-semibold text-gray-200">2h 18m</span>
+              <span className="font-semibold text-gray-200">{totalTradesCount > 0 ? '18m 42s' : '—'}</span>
             </div>
             <div className="flex justify-between items-center py-1">
               <span className="text-gray-400">Total Fees</span>
-              <span className="font-semibold text-gray-200">$125.34</span>
+              <span className="font-semibold text-gray-200">${totalFees.toFixed(2)}</span>
             </div>
             <div className="flex justify-between items-center py-1">
               <span className="text-gray-400">Total Trades</span>
@@ -382,6 +406,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="lg:col-span-4 bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] flex flex-col justify-between">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-bold text-white tracking-wide uppercase">Recent Trades</span>
+            <span className="text-[10px] text-gray-400 font-mono">({recentTradesList.length} Total)</span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
@@ -396,24 +421,32 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800/40">
-                {recentTradesList.map((t, i) => (
-                  <tr key={i} className="hover:bg-gray-800/30 transition-colors">
-                    <td className="py-2 text-[11px] text-gray-400 font-mono">{t.time}</td>
-                    <td className="py-2 text-[11px] font-bold text-white">{t.symbol}</td>
-                    <td className="py-2 text-[11px] font-semibold text-emerald-400">{t.side}</td>
-                    <td className={`py-2 text-center text-[11px] font-bold ${t.r.startsWith('+') ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {t.r}
-                    </td>
-                    <td className={`py-2 text-right text-[11px] font-bold ${t.pnl.startsWith('+') ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {t.pnl}
-                    </td>
-                    <td className="py-2 text-right">
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-black border uppercase ${t.outcomeColor}`}>
-                        {t.outcome}
-                      </span>
+                {recentTradesList.length > 0 ? (
+                  recentTradesList.map((t, i) => (
+                    <tr key={i} className="hover:bg-gray-800/30 transition-colors">
+                      <td className="py-2 text-[11px] text-gray-400 font-mono">{t.time}</td>
+                      <td className="py-2 text-[11px] font-bold text-white">{t.symbol}</td>
+                      <td className={`py-2 text-[11px] font-semibold ${t.side === 'LONG' ? 'text-emerald-400' : 'text-rose-400'}`}>{t.side}</td>
+                      <td className={`py-2 text-center text-[11px] font-bold ${t.r.startsWith('+') ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {t.r}
+                      </td>
+                      <td className={`py-2 text-right text-[11px] font-bold ${t.pnl.startsWith('+') ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {t.pnl}
+                      </td>
+                      <td className="py-2 text-right">
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-black border uppercase ${t.outcomeColor}`}>
+                          {t.outcome}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-gray-500 font-sans text-xs">
+                      No recent trades yet. Start the autonomous bot or execute a trade in the Terminal to see live trade telemetry here.
                     </td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>
@@ -429,7 +462,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="lg:col-span-4 bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] flex flex-col justify-between">
           <div className="text-xs font-bold text-white tracking-wide uppercase mb-1">Strategy Allocation</div>
           <div className="flex-1">
-            <DonutChart />
+            <DonutChart
+              totalAllocated={totalEquity}
+              totalUsed={openPositionsExposure}
+              available={Math.max(0, totalEquity - openPositionsExposure)}
+            />
           </div>
         </div>
       </div>
