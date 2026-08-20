@@ -10,6 +10,7 @@ import { deterministicRiskEngine } from '@/lib/risk/engine';
 import { paperBroker } from '@/lib/broker/paper';
 import { alpacaBrokerClient, buildPortfolioFromAlpaca } from '@/lib/broker/alpaca';
 import { dbPersistence, generateDecisionId } from '@/lib/db/schema';
+import { tradingDecisionEngine } from '@/lib/engine/TradingDecisionEngine';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 export type BotStatus = 'IDLE' | 'RUNNING' | 'PAUSED' | 'STOPPING' | 'STOPPED';
@@ -227,39 +228,40 @@ export class TradingBotEngine {
       const snap = await marketEngine.tick(sym);
       this.state.currentPrice = snap.price;
 
-      if (snap.dataQuality.criticalStale) {
-        this.log('WARN', `Data is STALE — skipping cycle (will retry in ${this.config.cycleIntervalSeconds}s)`);
-        this.scheduleNext(); this.push(); return;
+      if (snap.dataQuality.criticalStale || snap.price <= 0 || snap.dataQuality.tickerStatus === 'UNAVAILABLE') {
+        this.log('ERROR', `LIVE MARKET DATA UNAVAILABLE on ${sym} — HALTING BOT FOR SAFETY (Zero synthetic data allowed in Paper mode).`);
+        this.triggerExitRequest({
+          reason: `Market data feed lost or stale on ${sym} (Zero synthetic data allowed in Paper mode). Bot safely halted.`,
+          urgent: true,
+          triggeredAt: Date.now(),
+        });
+        return;
       }
 
       this.log('INFO', `Price: $${snap.price.toLocaleString()} · Spread: ${(snap.orderBook.spreadPercent * 100).toFixed(4)}%`);
 
-      // 2. Features
-      const feat = featureEngine.calculateFeatures(snap);
-
-      // 3. Agents + Fusion
-      const { signals, regime } = specialistAgentSystem.evaluateAllAgents(snap, feat);
-      const fusion = signalFusionEngine.fuseSignals(signals, regime);
-      this.log('INFO', `Fusion → ${fusion.dominantAction} (BUY ${(fusion.buyScore * 100).toFixed(0)}% / SELL ${(fusion.sellScore * 100).toFixed(0)}%) · Regime: ${regime}`);
-
-      // 4. LLM Decision
-      const decId = generateDecisionId();
-      const dec = await aiProviderManager.generateStructuredDecision(snap, feat, signals, fusion, regime);
-      dec.decisionId = decId;
-      this.state.currentDecision = dec;
-      this.state.lastDecisionAction = dec.action;
-      dbPersistence.saveDecisionLog(sym, snap.price, dec);
-      this.log('INFO', `LLM → ${dec.action} @ conf ${(dec.confidence * 100).toFixed(0)}% · ${dec.reasoning[0] ?? ''}`);
-
-      // 5. Portfolio state
+      // 2. Portfolio state
       const port = await this.getPortfolio(sym, snap.price);
       this.state.runningPnL = port.totalPnL;
 
-      // 6. Risk check
-      const risk = deterministicRiskEngine.evaluate(dec, port, snap, feat);
+      // 3. Unified Trading Decision Engine
+      const evalResult = await tradingDecisionEngine.evaluate({
+        snapshot: snap,
+        portfolio: port,
+        allocatedCapital: this.config.allocatedCapital,
+        riskPercent: 0.5,
+      });
+
+      const { decision: dec, riskCheck: risk, fusion, regime } = evalResult;
+      dec.decisionId = generateDecisionId();
+      this.state.currentDecision = dec;
+      this.state.lastDecisionAction = dec.action;
       this.state.currentRiskCheck = risk;
 
-      // 7. Execute trade if approved
+      dbPersistence.saveDecisionLog(sym, snap.price, dec);
+      this.log('INFO', `Fusion → ${fusion.dominantAction} · Regime: ${regime} · LLM Decision: ${dec.action} (${(dec.confidence * 100).toFixed(0)}%)`);
+
+      // 4. Execute trade if approved
       if (risk.approved && (dec.action === 'BUY' || dec.action === 'SELL')) {
         await this.executeTrade(sym, dec, risk, snap, port);
       } else if (dec.action === 'NO_TRADE' || dec.action === 'HOLD') {

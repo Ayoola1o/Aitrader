@@ -106,7 +106,6 @@ export default function Home() {
 
     if (alpacaKey && alpacaSecret) {
       alpacaBrokerClient.setCredentials({ apiKeyId: alpacaKey, secretKey: alpacaSecret, isPaper: true });
-      marketEngine.setAlpacaCredentials(alpacaKey, alpacaSecret);
     }
 
     // Sync active cloud bot from Supabase if running
@@ -305,22 +304,20 @@ export default function Home() {
   const handleClosePosition = async (positionId: string) => {
     if (!snapshot) return;
     const pos = positions.find((p) => p.id === positionId);
+
     if (alpacaBrokerClient.hasCredentials()) {
-      if (!pos) {
-        showNotification('Error: position not found');
-        return;
-      }
       try {
-        await alpacaBrokerClient.closePosition(pos.symbol);
-        showNotification(`Closed ${pos.symbol} position on Alpaca`);
+        const symbolToClose = pos?.symbol || snapshot.symbol;
+        await alpacaBrokerClient.closePosition(symbolToClose);
+        showNotification(`Alpaca: Closed ${symbolToClose} position`);
         telegramService.sendPositionClosedAlert({
-          symbol: pos.symbol,
-          side: pos.side,
-          entryPrice: pos.entryPrice,
+          symbol: symbolToClose,
+          side: pos?.side || 'LONG',
+          entryPrice: pos?.entryPrice || snapshot.price,
           exitPrice: snapshot.price,
-          size: pos.size,
-          realizedPnL: pos.unrealizedPnL,
-          pnlPercent: pos.entryPrice > 0 ? ((snapshot.price - pos.entryPrice) / pos.entryPrice) * 100 : 0,
+          size: pos?.size || 0,
+          realizedPnL: 0,
+          pnlPercent: 0,
           closeReason: 'MANUAL_CLOSE',
         }).catch(() => {});
       } catch (err: unknown) {
@@ -329,20 +326,22 @@ export default function Home() {
       }
     } else {
       const result = paperBroker.closePosition(positionId, snapshot.price, 'MANUAL');
-      showNotification(
-        result.success ? `Closed position (PnL: $${result.pnl?.toFixed(2) ?? '0'})` : `Error: ${result.message}`
-      );
-      if (result.success && pos) {
-        telegramService.sendPositionClosedAlert({
-          symbol: pos.symbol,
-          side: pos.side,
-          entryPrice: pos.entryPrice,
-          exitPrice: snapshot.price,
-          size: pos.size,
-          realizedPnL: result.pnl || 0,
-          pnlPercent: pos.entryPrice > 0 ? ((snapshot.price - pos.entryPrice) / pos.entryPrice) * 100 : 0,
-          closeReason: 'MANUAL_CLOSE',
-        }).catch(() => {});
+      if (result) {
+        showNotification(`Closed position (PnL: $${result.realizedPnL.toFixed(2)})`);
+        if (pos) {
+          telegramService.sendPositionClosedAlert({
+            symbol: pos.symbol,
+            side: pos.side,
+            entryPrice: pos.entryPrice,
+            exitPrice: snapshot.price,
+            size: pos.size,
+            realizedPnL: result.realizedPnL || 0,
+            pnlPercent: result.realizedPnLPercent || 0,
+            closeReason: 'MANUAL_CLOSE',
+          }).catch(() => {});
+        }
+      } else {
+        showNotification('Position not found');
       }
     }
     await updateMarket();
@@ -438,6 +437,7 @@ export default function Home() {
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={handleToggleSidebar}
           onModeChange={(m) => setAppMode(m)}
+          dataStatus={snapshot?.dataQuality?.tickerStatus || (appMode === 'DEMO' ? 'SIMULATED' : 'LIVE')}
         />
 
         {/* Notification Toast */}

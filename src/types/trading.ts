@@ -61,6 +61,7 @@ export interface OrderBook {
   bidDepth: number;
   askDepth: number;
   midPrice: number;
+  status?: DataStatus;
 }
 
 export interface TradeTick {
@@ -275,20 +276,26 @@ export interface PortfolioState {
   equity: number;
   marginUsed: number;
   freeMargin: number;
+  buyingPower?: number;
   unrealizedPnL: number;
   totalPnL: number;
   totalPnLPercent: number;
   dailyPnL: number;
+  dailyPnLPercent?: number;
   dailyDrawdownPercent: number;
   maxDrawdownPercent: number;
-  totalFees: number;
+  totalFees?: number;
   winRate: number;
-  profitFactor: number;
+  profitFactor?: number;
   sharpeRatio: number;
-  totalTrades: number;
-  winningTrades: number;
-  losingTrades: number;
-  equityCurve: { time: number; equity: number }[];
+  totalTrades?: number;
+  winningTrades?: number;
+  losingTrades?: number;
+  openPositionsCount?: number;
+  totalTradesCount?: number;
+  peakEquity?: number;
+  dailyStartBalance?: number;
+  equityCurve?: { time: number; equity: number }[];
 }
 
 export interface AgentPerformanceMetric {

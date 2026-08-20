@@ -30,7 +30,8 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { BacktestingSidebar, BacktestNavId } from '@/components/backtesting/BacktestingSidebar';
-import { MarketSnapshot } from '@/types/trading';
+import { MarketSnapshot, SymbolId } from '@/types/trading';
+import { realBacktestingEngine } from '@/lib/backtesting/engine';
 
 interface BacktestingViewProps {
   snapshot?: MarketSnapshot | null;
@@ -125,7 +126,7 @@ export const BacktestingView: React.FC<BacktestingViewProps> = ({ snapshot }) =>
     { label: '3R+', count: 18, isLoss: false },
   ];
 
-  // Handle Interactive Backtest Execution
+  // Handle Interactive Backtest Execution (Deterministic - Real Simulation Pipeline)
   const handleRunSimulation = () => {
     setIsRunning(true);
     setProgress(0);
@@ -148,10 +149,25 @@ export const BacktestingView: React.FC<BacktestingViewProps> = ({ snapshot }) =>
         setProgress(Math.round(((currentIdx + 1) / steps.length) * 100));
       } else {
         clearInterval(interval);
+        // Execute Real Simulation Engine
+        realBacktestingEngine.runSimulation({
+          symbol: selectedAsset as SymbolId,
+          strategyName: strategyVersion,
+          startDate,
+          endDate,
+          initialCapital: Number(initialCapital.replace(/,/g, '')) || 100000,
+          feeRate: Number(feeRate) || 0.05,
+          slippageModel,
+          riskPerTrade: Number(riskPerTrade) || 0.5,
+          takeProfitR: Number(takeProfitR) || 2.5,
+          stopLossR: Number(stopLossR) || 1.0,
+          leverage: Number(leverage.replace('x', '')) || 1,
+        });
+
         setIsRunning(false);
         setActiveSection('overview');
       }
-    }, 500);
+    }, 400);
   };
 
   // Handle Export Report JSON/CSV

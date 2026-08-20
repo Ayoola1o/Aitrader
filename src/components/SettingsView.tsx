@@ -39,11 +39,12 @@ import {
   FileText,
 } from 'lucide-react';
 import { SettingsSidebar, SettingsNavId } from '@/components/settings/SettingsSidebar';
+import { AppMode } from '@/types/trading';
 import { aiProviderManager, AIProviderId } from '@/lib/llm/providers';
 import { dbPersistence } from '@/lib/db/schema';
 import { paperBroker } from '@/lib/broker/paper';
 import { alpacaBrokerClient } from '@/lib/broker/alpaca';
-import { AppMode } from '@/types/trading';
+import { systemHealthService } from '@/lib/health/SystemHealthService';
 import { supabaseManager } from '@/lib/db/supabase';
 import { telegramService } from '@/lib/notifications/telegram';
 import { applySettings, loadSettings, saveSettings, DEFAULT_SETTINGS } from '@/lib/settings';
@@ -214,18 +215,41 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }, 600);
   };
 
-  // Handle Test All Connections
+  // Handle Test All Connections (Deterministic - zero Math.random)
   const handleTestAllConnections = async () => {
     setIsTestingAll(true);
     setLastCheckSeconds(0);
-    setTimeout(() => {
-      setBinanceLatency(`${Math.floor(Math.random() * 20 + 35)}ms`);
-      setAlpacaLatency(`${Math.floor(Math.random() * 25 + 60)}ms`);
-      setSupabaseLatency(`${Math.floor(Math.random() * 20 + 55)}ms`);
-      setTelegramLatency(`${Math.floor(Math.random() * 80 + 260)}ms`);
-      setAiLatency(`${(Math.random() * 0.4 + 1.1).toFixed(2)}s`);
+    try {
+      const summary = await systemHealthService.testAll();
+      const s = summary.services;
+      if (s.marketData) {
+        setBinanceStatus(s.marketData.status);
+        setBinanceLatency(`${s.marketData.latencyMs}ms`);
+      }
+      if (s.broker) {
+        setAlpacaStatus(s.broker.status);
+        setAlpacaLatency(`${s.broker.latencyMs}ms`);
+      }
+      if (s.supabase) {
+        setSupabaseStatus(s.supabase.status);
+        setSupabaseLatency(`${s.supabase.latencyMs}ms`);
+      }
+      if (s.telegram) {
+        setTelegramStatus(s.telegram.status);
+        setTelegramLatency(`${s.telegram.latencyMs}ms`);
+      }
+      if (s.aiProvider) {
+        setAiStatus(s.aiProvider.status);
+        setAiLatency(`${s.aiProvider.latencyMs}ms`);
+      }
+      if (s.riskEngine) {
+        setRiskEngineStatus(s.riskEngine.status);
+      }
+    } catch {
+      // Fallback in case of top-level error
+    } finally {
       setIsTestingAll(false);
-    }, 900);
+    }
   };
 
   // Handle Export Settings JSON

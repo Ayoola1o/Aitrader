@@ -30,19 +30,6 @@ export const sessionManager = {
       const email = identifier.includes('@') ? identifier : `${identifier.toLowerCase()}@quantarion.ai`;
       const cleanUsername = identifier.includes('@') ? identifier.split('@')[0] : identifier;
 
-      // Master Account Authentication
-      if (cleanUsername.toLowerCase() === 'azahadinc' && password === 'Ayoola10') {
-        const user: UserSession = {
-          id: 'usr-azahadinc-master',
-          email: 'azahadinc@quantarion.ai',
-          name: 'Ayoola Adebisi (Azahadinc)',
-          role: 'ADMIN',
-          createdAt: Date.now(),
-        };
-        this.persistSession(user);
-        return { success: true, user };
-      }
-
       const client = supabaseManager.getClient();
       if (client) {
         const { data, error } = await client.auth.signInWithPassword({
@@ -55,28 +42,22 @@ export const sessionManager = {
             id: data.user.id,
             email: data.user.email || email,
             name: data.user.user_metadata?.name || cleanUsername,
-            role: 'TRADER',
+            role: (data.user.user_metadata?.role as any) || 'TRADER',
             createdAt: new Date(data.user.created_at).getTime(),
           };
           this.persistSession(user);
           return { success: true, user };
         }
+        if (error) {
+          return { success: false, error: error.message };
+        }
       }
 
-      // Local / Offline fallback authentication
-      if (identifier && password.length >= 6) {
-        const user: UserSession = {
-          id: `usr-${btoa(email).slice(0, 12).toLowerCase()}`,
-          email,
-          name: cleanUsername,
-          role: 'TRADER',
-          createdAt: Date.now(),
-        };
-        this.persistSession(user);
-        return { success: true, user };
-      }
-
-      return { success: false, error: 'Password must be at least 6 characters' };
+      // If Supabase is unconfigured, provide structured error instead of silent mock bypass in production
+      return {
+        success: false,
+        error: 'Authentication failed. Please verify your Supabase credentials or network connection.',
+      };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return { success: false, error: msg };
@@ -91,7 +72,7 @@ export const sessionManager = {
           email,
           password,
           options: {
-            data: { name },
+            data: { name, role: 'TRADER' },
           },
         });
 
@@ -106,22 +87,15 @@ export const sessionManager = {
           this.persistSession(user);
           return { success: true, user };
         }
+        if (error) {
+          return { success: false, error: error.message };
+        }
       }
 
-      // Local / Offline fallback registration
-      if (email && password.length >= 6) {
-        const user: UserSession = {
-          id: `usr-${btoa(email).slice(0, 12).toLowerCase()}`,
-          email,
-          name: name || email.split('@')[0],
-          role: 'TRADER',
-          createdAt: Date.now(),
-        };
-        this.persistSession(user);
-        return { success: true, user };
-      }
-
-      return { success: false, error: 'Password must be at least 6 characters' };
+      return {
+        success: false,
+        error: 'Registration failed. Supabase connection required for secure account provisioning.',
+      };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return { success: false, error: msg };
@@ -129,12 +103,12 @@ export const sessionManager = {
   },
 
   async loginWithApiKey(apiKey: string): Promise<{ success: boolean; error?: string; user?: UserSession }> {
-    if (!apiKey || apiKey.trim().length < 8) {
-      return { success: false, error: 'Invalid API Key length' };
+    if (!apiKey || apiKey.trim().length < 16) {
+      return { success: false, error: 'Invalid Institutional API Key format (minimum 16 chars required)' };
     }
 
     const user: UserSession = {
-      id: `key-${apiKey.slice(0, 8)}`,
+      id: `usr-key-${apiKey.slice(0, 8)}`,
       email: `quant-${apiKey.slice(0, 6)}@quantarion.ai`,
       name: `Institutional Quant (${apiKey.slice(0, 4)}***)`,
       role: 'QUANT',

@@ -42,37 +42,17 @@ interface ScatterPoint {
   reasoning?: string[];
 }
 
-// Generate realistic simulated data points if local database is fresh
-const generateSimulatedScatterPoints = (): ScatterPoint[] => {
-  const points: ScatterPoint[] = [];
-  const regimes = ['TRENDING_UP', 'TRANSITION', 'TRENDING_DOWN', 'SIDEWAYS'];
-
-  for (let i = 1; i <= 140; i++) {
-    const idx = Math.round((i / 140) * 616);
-    const rand = Math.random();
-    const action: 'BUY' | 'SELL' | 'NO_TRADE' =
-      rand > 0.85 ? 'BUY' : rand > 0.72 ? 'SELL' : 'NO_TRADE';
-    const baseConf = action === 'BUY' ? 68 : action === 'SELL' ? 62 : 52;
-    const confidence = Math.max(
-      20,
-      Math.min(95, Math.round(baseConf + (Math.random() - 0.5) * 30))
-    );
-    const regime = regimes[Math.floor(Math.random() * regimes.length)];
-
-    points.push({
-      id: `DEC-20260820-${String(idx).padStart(6, '0')}`,
-      index: idx,
-      confidence,
-      action,
-      regime,
-      entry: action !== 'NO_TRADE' ? 64250 + (Math.random() - 0.5) * 1200 : null,
-      reasoning: [
-        `Consensus confirmed across 8 specialists in ${regime} regime.`,
-        `Risk-Reward multiple >= 2.5 with approved volatility gate.`,
-      ],
-    });
-  }
-  return points;
+// Map real persisted decisions to scatter points (Zero Math.random)
+const mapDecisionsToScatterPoints = (decList: DecisionJournalEntry[]): ScatterPoint[] => {
+  return decList.map((d, idx) => ({
+    id: d.decisionId,
+    index: idx + 1,
+    confidence: Math.round((d.confidence <= 1 ? d.confidence * 100 : d.confidence)),
+    action: (d.action === 'BUY' || d.action === 'SELL' ? d.action : 'NO_TRADE'),
+    regime: d.regime || 'TRENDING_UP',
+    entry: d.entry,
+    reasoning: d.reasoning,
+  }));
 };
 
 export const ReplayResearchView: React.FC<ReplayResearchViewProps> = ({
@@ -203,20 +183,9 @@ export const ReplayResearchView: React.FC<ReplayResearchViewProps> = ({
     ];
   }, [dbDecisions]);
 
-  // Scatter Points from decisions or realistic simulation
+  // Scatter Points from real decisions
   const scatterPoints = useMemo(() => {
-    if (decisions.length >= 10) {
-      return decisions.map((d, idx) => ({
-        id: d.decisionId || `DEC-${idx + 1}`,
-        index: idx + 1,
-        confidence: Math.round((d.confidence || 0.6) * 100),
-        action: (d.action === 'BUY' ? 'BUY' : d.action === 'SELL' ? 'SELL' : 'NO_TRADE') as 'BUY' | 'SELL' | 'NO_TRADE',
-        regime: d.regime || 'ACTIVE_MARKET',
-        entry: d.entry,
-        reasoning: d.reasoning,
-      }));
-    }
-    return generateSimulatedScatterPoints();
+    return mapDecisionsToScatterPoints(decisions);
   }, [decisions]);
 
   const totalDecisions = scatterPoints.length;

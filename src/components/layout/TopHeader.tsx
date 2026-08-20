@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import { Menu, Bell, ChevronDown, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
-import { AppMode } from '@/types/trading';
+import { AppMode, DataStatus } from '@/types/trading';
+import { DataTruthBadge } from '@/components/common/DataTruthBadge';
 
 interface TopHeaderProps {
   title?: string;
@@ -16,6 +17,7 @@ interface TopHeaderProps {
   isSidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
   onModeChange?: (mode: AppMode) => void;
+  dataStatus?: DataStatus;
 }
 
 export const TopHeader: React.FC<TopHeaderProps> = ({
@@ -29,6 +31,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   isExchangeConnected = true,
   isSidebarCollapsed = false,
   onToggleSidebar,
+  dataStatus,
 }) => {
   const [timeframe, setTimeframe] = useState<'24H' | '7D' | '30D' | 'ALL'>('24H');
   const [notificationsCount, setNotificationsCount] = useState(3);
@@ -64,6 +67,9 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
       {/* Right: Metrics & Controls */}
       <div className="flex items-center gap-2 sm:gap-3">
+        {/* Data Truth Status Badge (Fix 19) */}
+        <DataTruthBadge status={dataStatus || (appMode === 'DEMO' ? 'SIMULATED' : 'LIVE')} />
+
         {/* Mode Pill */}
         <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0B111E] border border-[#1E293B] text-[11px] font-semibold text-gray-300">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
