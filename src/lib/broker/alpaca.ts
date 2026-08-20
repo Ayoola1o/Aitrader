@@ -15,10 +15,23 @@ export interface AlpacaCredentials {
 export interface AlpacaOrderParams {
   symbol: string;
   side: 'buy' | 'sell';
-  qty: number;
-  type?: 'market' | 'limit';
-  time_in_force?: 'day' | 'gtc' | 'ioc';
+  qty?: number;
+  notional?: number;
+  type?: 'market' | 'limit' | 'stop' | 'stop_limit' | 'trailing_stop';
+  time_in_force?: 'day' | 'gtc' | 'ioc' | 'fok';
   limit_price?: number;
+  stop_price?: number;
+  trail_price?: number;
+  trail_percent?: number;
+  extended_hours?: boolean;
+  order_class?: 'simple' | 'bracket' | 'oco' | 'oto';
+  take_profit?: {
+    limit_price: number;
+  };
+  stop_loss?: {
+    stop_price: number;
+    limit_price?: number;
+  };
 }
 
 export interface AlpacaAccountSummary {
@@ -28,6 +41,24 @@ export interface AlpacaAccountSummary {
   cash: number;
   portfolioValue: number;
   status: string;
+  daytradeCount?: number;
+  daytradingBuyingPower?: number;
+  regtBuyingPower?: number;
+  initialMargin?: number;
+  maintenanceMargin?: number;
+}
+
+export interface AlpacaActivityItem {
+  id: string;
+  activity_type: 'FILL' | 'DIV' | 'INT' | 'FEE' | 'CSD' | 'CSW';
+  transaction_time: string;
+  symbol?: string;
+  side?: 'buy' | 'sell';
+  qty?: string;
+  price?: string;
+  order_id?: string;
+  type?: string;
+  net_amount?: string;
 }
 
 export interface OrderResult {
@@ -322,25 +353,27 @@ export const alpacaBrokerClient = {
     return json.data.map((a: Record<string, unknown>) => mapAlpacaActivity(a));
   },
 
-  async submitOrder(
-    symbol: SymbolId | string,
-    qty: number,
-    side: 'buy' | 'sell',
-    type: 'market' | 'limit' = 'market',
-    limitPrice?: number
-  ): Promise<OrderResult> {
+  async placeOrder(params: AlpacaOrderParams): Promise<OrderResult> {
     try {
       const res = await fetch('/api/alpaca', {
         method: 'POST',
         headers: getRequestHeaders(),
         body: JSON.stringify({
           action: 'placeOrder',
-          symbol: toAlpacaSymbol(symbol),
-          side,
-          qty,
-          type,
-          time_in_force: 'gtc',
-          limit_price: limitPrice,
+          symbol: toAlpacaSymbol(params.symbol),
+          side: params.side,
+          qty: params.qty,
+          notional: params.notional,
+          type: params.type || 'market',
+          time_in_force: params.time_in_force || 'gtc',
+          limit_price: params.limit_price,
+          stop_price: params.stop_price,
+          trail_price: params.trail_price,
+          trail_percent: params.trail_percent,
+          extended_hours: params.extended_hours,
+          order_class: params.order_class,
+          take_profit: params.take_profit,
+          stop_loss: params.stop_loss,
         }),
       });
 
@@ -356,7 +389,7 @@ export const alpacaBrokerClient = {
       const orderId = String(orderData.id ?? '');
       return {
         success: true,
-        message: `${side.toUpperCase()} ${qty} ${toAlpacaSymbol(symbol)} submitted (${type.toUpperCase()})`,
+        message: `${params.side.toUpperCase()} ${params.qty || `$${params.notional}`} ${toAlpacaSymbol(params.symbol)} submitted (${(params.type || 'market').toUpperCase()})`,
         orderId,
         data: orderData,
       };
@@ -364,6 +397,23 @@ export const alpacaBrokerClient = {
       const message = err instanceof Error ? err.message : String(err);
       return { success: false, message: `Order submission failed: ${message}` };
     }
+  },
+
+  async submitOrder(
+    symbol: SymbolId | string,
+    qty: number,
+    side: 'buy' | 'sell',
+    type: 'market' | 'limit' = 'market',
+    limitPrice?: number
+  ): Promise<OrderResult> {
+    return this.placeOrder({
+      symbol,
+      qty,
+      side,
+      type,
+      limit_price: limitPrice,
+      time_in_force: 'gtc',
+    });
   },
 
   async cancelOrder(orderId: string): Promise<OrderResult> {
@@ -410,6 +460,88 @@ export const alpacaBrokerClient = {
       const message = err instanceof Error ? err.message : String(err);
       return { success: false, message };
     }
+  },
+
+  async submitBracketOrder(
+    symbol: SymbolId | string,
+    side: 'buy' | 'sell',
+    qty: number,
+    takeProfitPrice: number,
+    stopLossPrice: number,
+    limitPrice?: number
+  ): Promise<OrderResult> {
+    return this.placeOrder({
+      symbol: toAlpacaSymbol(symbol),
+      side,
+      qty,
+      type: limitPrice ? 'limit' : 'market',
+      limit_price: limitPrice,
+      order_class: 'bracket',
+      take_profit: { limit_price: takeProfitPrice },
+      stop_loss: { stop_price: stopLossPrice },
+    });
+  },
+
+  async submitFractionalOrder(
+    symbol: SymbolId | string,
+    side: 'buy' | 'sell',
+    params: { qty?: number; notional?: number }
+  ): Promise<OrderResult> {
+    return this.placeOrder({
+      symbol: toAlpacaSymbol(symbol),
+      side,
+      qty: params.qty,
+      notional: params.notional,
+      type: 'market',
+      time_in_force: 'day',
+    });
+  },
+
+  async getAccountActivities(activityType: 'FILL' | 'DIV' | 'INT' | 'FEE' = 'FILL', pageSize = 50): Promise<AlpacaActivityItem[]> {
+    try {
+      const res = await fetch(`/api/alpaca?action=activities&activity_type=${activityType}&page_size=${pageSize}`, {
+        headers: getRequestHeaders(),
+        cache: 'no-store',
+      });
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        return json.data as AlpacaActivityItem[];
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  },
+
+  calculateRegTMargin(positions: Position[], equity: number) {
+    const totalExposure = positions.reduce((acc, p) => acc + p.size * (p.currentPrice || p.entryPrice), 0);
+    const initialMarginRequired = totalExposure * 0.5; // Reg T 50%
+    const maintenanceMarginRequired = positions.reduce((acc, p) => {
+      const price = p.currentPrice || p.entryPrice;
+      const mktVal = p.size * price;
+      if (p.side === 'LONG') {
+        if (price < 2.5) return acc + mktVal * 1.0;
+        if (price <= 6.0) return acc + mktVal * 0.5;
+        return acc + mktVal * 0.3;
+      } else {
+        return acc + Math.max(mktVal * 0.3, p.size * (price < 5.0 ? 2.5 : 5.0));
+      }
+    }, 0);
+
+    const isEligibleForMargin = equity >= 2000;
+    const intradayDTBP = isEligibleForMargin ? equity * 4 : equity;
+    const overnightBuyingPower = isEligibleForMargin ? equity * 2 : equity;
+
+    return {
+      isEligibleForMargin,
+      totalExposure,
+      initialMarginRequired,
+      maintenanceMarginRequired,
+      intradayDTBP,
+      overnightBuyingPower,
+      marginExcess: Math.max(0, equity - maintenanceMarginRequired),
+      inMarginCall: equity < maintenanceMarginRequired,
+    };
   },
 
   async closeAllPositions(): Promise<number> {

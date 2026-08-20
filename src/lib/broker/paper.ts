@@ -309,6 +309,19 @@ export class PaperBroker {
     return false;
   }
 
+  reset(startingBalance = 100000): void {
+    this.balance = startingBalance;
+    this.initialBalance = startingBalance;
+    this.dailyStartBalance = startingBalance;
+    this.peakEquity = startingBalance;
+    this.positions.clear();
+    this.orders = [];
+    this.tradeHistory = [];
+    this.totalFees = 0;
+    this.equityCurve = [{ time: Date.now(), equity: startingBalance }];
+    this.saveToStorage();
+  }
+
   getPositions(): Position[] { return Array.from(this.positions.values()); }
   getOrders(): Order[] { return this.orders.slice(-100); }
   getTradeHistory(): TradeHistoryItem[] { return this.tradeHistory; }

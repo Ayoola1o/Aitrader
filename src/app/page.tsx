@@ -556,7 +556,12 @@ export default function Home() {
           {activeTab === 'alerts' && <AlertsView />}
 
           {activeTab === 'settings' && (
-            <SettingsView onModeChange={(mode) => setAppMode(mode)} onCredentialsChange={() => updateMarket()} />
+            <SettingsView
+              onModeChange={(mode) => setAppMode(mode)}
+              onCredentialsChange={() => updateMarket()}
+              onNavigateTerminal={() => setActiveTab('terminal')}
+              onNavigateStrategies={() => setActiveTab('strategies')}
+            />
           )}
         </main>
 

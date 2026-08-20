@@ -115,22 +115,41 @@ export async function POST(req: NextRequest) {
     const action = body.action || 'placeOrder';
 
     if (action === 'placeOrder') {
-      let { symbol, side, qty, type = 'market', time_in_force = 'gtc', limit_price } = body;
-      
-      if (!symbol || !side || !qty) {
-        return NextResponse.json({ success: false, error: 'Missing required order parameters (symbol, side, qty)' }, { status: 400 });
+      const {
+        symbol,
+        side,
+        qty,
+        notional,
+        type = 'market',
+        time_in_force = 'gtc',
+        limit_price,
+        stop_price,
+        trail_price,
+        trail_percent,
+        extended_hours,
+        order_class,
+        take_profit,
+        stop_loss,
+      } = body;
+
+      if (!symbol || !side || (!qty && !notional)) {
+        return NextResponse.json(
+          { success: false, error: 'Missing required order parameters (symbol, side, and either qty or notional)' },
+          { status: 400 }
+        );
+      }
+
+      if (qty && notional) {
+        return NextResponse.json(
+          { success: false, error: 'qty and notional are mutually exclusive per Alpaca fractional trading API' },
+          { status: 400 }
+        );
       }
 
       // Convert symbol for Alpaca Crypto if needed (e.g. BTCUSDT -> BTC/USD)
       let formattedSymbol = symbol;
       if (!formattedSymbol.includes('/')) {
         formattedSymbol = formattedSymbol.replace('USDT', '/USD').replace('USD', '/USD');
-      }
-
-      // Format qty precision (e.g. BTC max 4-6 decimals, non-negative)
-      const numQty = parseFloat(String(qty));
-      if (isNaN(numQty) || numQty <= 0) {
-        return NextResponse.json({ success: false, error: 'Invalid order quantity' }, { status: 400 });
       }
 
       // Crypto orders on Alpaca require time_in_force 'gtc' or 'ioc'
@@ -142,11 +161,43 @@ export async function POST(req: NextRequest) {
         side: side.toLowerCase(),
         type: type.toLowerCase(),
         time_in_force: tif,
-        qty: numQty.toString(),
       };
+
+      if (qty) {
+        const numQty = parseFloat(String(qty));
+        if (isNaN(numQty) || numQty <= 0) {
+          return NextResponse.json({ success: false, error: 'Invalid order quantity' }, { status: 400 });
+        }
+        payload.qty = numQty.toString();
+      } else if (notional) {
+        const numNotional = parseFloat(String(notional));
+        if (isNaN(numNotional) || numNotional < 1.0) {
+          return NextResponse.json({ success: false, error: 'Minimum notional order size is $1.00' }, { status: 400 });
+        }
+        payload.notional = numNotional.toString();
+      }
 
       if (type.toLowerCase() === 'limit' && limit_price) {
         payload.limit_price = parseFloat(String(limit_price)).toString();
+      }
+
+      if (['stop', 'stop_limit'].includes(type.toLowerCase()) && stop_price) {
+        payload.stop_price = parseFloat(String(stop_price)).toString();
+      }
+
+      if (type.toLowerCase() === 'trailing_stop') {
+        if (trail_percent) payload.trail_percent = parseFloat(String(trail_percent)).toString();
+        if (trail_price) payload.trail_price = parseFloat(String(trail_price)).toString();
+      }
+
+      if (extended_hours && !isCrypto) {
+        payload.extended_hours = true;
+      }
+
+      if (order_class) {
+        payload.order_class = order_class;
+        if (take_profit) payload.take_profit = take_profit;
+        if (stop_loss) payload.stop_loss = stop_loss;
       }
 
       const res = await fetch(`${baseUrl}/orders`, {
