@@ -77,14 +77,151 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
   const [activeLogBot, setActiveLogBot] = useState<BotStrategyItem | null>(null);
   const [editingBot, setEditingBot] = useState<BotStrategyItem | null>(null);
 
+  // Prebuilt Custom Institutional Strategy Templates
+  const PREBUILT_STRATEGY_TEMPLATES = [
+    {
+      id: 'ai-core',
+      name: 'AI Quant Core v1.3',
+      presetLabel: '🤖 AI Quant Core (Multi-Agent Fusion + LLM)',
+      symbol: 'BTCUSDT',
+      capital: 5000,
+      interval: '30',
+      maxDD: '5.0',
+      maxPos: '2.0',
+      desc: '5-specialist agent ensemble with neural signal fusion and deterministic risk gate.',
+      badge: 'FLAGSHIP',
+    },
+    {
+      id: 'hawk-breakout',
+      name: 'Hawk — 7-Day Range Breakout',
+      presetLabel: '🦅 Hawk (Breakout Strikers · BTC/ETH/SOL)',
+      symbol: 'BTCUSDT',
+      capital: 2500,
+      interval: '30',
+      maxDD: '4.5',
+      maxPos: '2.5',
+      desc: 'Confirmed 7-day range breaks with smart-money alignment; tight 8% Phase 1 stop.',
+      badge: 'BREAKOUT',
+    },
+    {
+      id: 'camel-carry',
+      name: 'Camel — Funding Carry Arbitrage',
+      presetLabel: '🐫 Camel (Funding Carry · Hyperliquid L1)',
+      symbol: 'ETHUSDT',
+      capital: 3000,
+      interval: '60',
+      maxDD: '4.0',
+      maxPos: '3.0',
+      desc: 'Harvests perp funding carry across liquid pairs with crowd exhaustion filters.',
+      badge: 'CARRY / NEUTRAL',
+    },
+    {
+      id: 'whalehunter',
+      name: 'WhaleHunter — Smart Money Mirror',
+      presetLabel: '🐋 WhaleHunter (Smart Money Divergence Mirror)',
+      symbol: 'SOLUSDT',
+      capital: 4000,
+      interval: '30',
+      maxDD: '5.0',
+      maxPos: '2.0',
+      desc: 'Mirrors ≥$1M realized whale wallet positioning while fading retail crowd traps.',
+      badge: 'SMART MONEY',
+    },
+    {
+      id: 'viper-smc',
+      name: 'Viper — SMC / ICT Order Blocks',
+      presetLabel: '🐍 Viper (SMC/ICT Fair Value Gaps & Sweeps)',
+      symbol: 'BTCUSDT',
+      capital: 3500,
+      interval: '15',
+      maxDD: '3.5',
+      maxPos: '1.5',
+      desc: 'Smart Money Concepts targeting liquidity sweep wicks and Fair Value Gap retests.',
+      badge: 'ICT / SMC',
+    },
+    {
+      id: 'hornet-semis',
+      name: 'Hornet — AI Semis Momentum',
+      presetLabel: '🐝 Hornet (Semiconductor AI Hardware Momentum)',
+      symbol: 'ETHUSDT',
+      capital: 2000,
+      interval: '15',
+      maxDD: '6.0',
+      maxPos: '2.5',
+      desc: 'High-beta momentum momentum targeting tech supply-chain catalysts.',
+      badge: 'HIGH ALPHA',
+    },
+    {
+      id: 'dire-oil',
+      name: 'Dire — Macro Energy & Oil',
+      presetLabel: '🛢️ Dire (BRENTOIL Crude Supply Shock Specialist)',
+      symbol: 'BTCUSDT',
+      capital: 2000,
+      interval: '60',
+      maxDD: '4.0',
+      maxPos: '2.0',
+      desc: 'Trades macroeconomic energy inventory breaks and geopolitical supply shocks.',
+      badge: 'COMMODITIES',
+    },
+    {
+      id: 'ram-gold',
+      name: 'Ram — Safe-Haven Gold Specialist',
+      presetLabel: '🥇 Ram (Safe-Haven Gold & Real Rates Hedge)',
+      symbol: 'BTCUSDT',
+      capital: 3000,
+      interval: '300',
+      maxDD: '3.0',
+      maxPos: '2.0',
+      desc: 'Macro hedge tracking real interest rates, dollar debasement, and flight-to-safety.',
+      badge: 'DEFENSIVE',
+    },
+    {
+      id: 'cheetah-sniper',
+      name: 'Cheetah — Multi-Signal Scalper',
+      presetLabel: '🐆 Cheetah (High-Frequency Confluence Sniper)',
+      symbol: 'SOLUSDT',
+      capital: 1500,
+      interval: '15',
+      maxDD: '4.0',
+      maxPos: '1.0',
+      desc: 'Fast 15-second orderbook spread scalp on sudden microstructure imbalances.',
+      badge: 'SCALPER',
+    },
+    {
+      id: 'custom-arch',
+      name: 'Custom Quant Bot',
+      presetLabel: '⚡ Custom Architecture (User-Defined)',
+      symbol: 'BTCUSDT',
+      capital: 1000,
+      interval: '30',
+      maxDD: '5.0',
+      maxPos: '2.0',
+      desc: 'Fully customizable parameters, risk thresholds, and scan cadence.',
+      badge: 'CUSTOM',
+    },
+  ];
+
   // New Bot Form State
-  const [newBotName, setNewBotName] = useState('');
+  const [newBotName, setNewBotName] = useState('AI Quant Core v1.3');
   const [newBotSymbol, setNewBotSymbol] = useState<SymbolId>('BTCUSDT');
-  const [newBotCapital, setNewBotCapital] = useState('1000');
+  const [newBotCapital, setNewBotCapital] = useState('5000');
   const [newBotInterval, setNewBotInterval] = useState('30');
-  const [newBotStrategyPreset, setNewBotStrategyPreset] = useState('AI Quant Core');
+  const [newBotStrategyPreset, setNewBotStrategyPreset] = useState('ai-core');
   const [newBotMaxDD, setNewBotMaxDD] = useState('5.0');
   const [newBotMaxPos, setNewBotMaxPos] = useState('2.0');
+
+  const handlePresetChange = (presetId: string) => {
+    setNewBotStrategyPreset(presetId);
+    const found = PREBUILT_STRATEGY_TEMPLATES.find((p) => p.id === presetId);
+    if (found) {
+      setNewBotName(found.name);
+      setNewBotSymbol(found.symbol as SymbolId);
+      setNewBotCapital(String(found.capital));
+      setNewBotInterval(found.interval);
+      setNewBotMaxDD(found.maxDD);
+      setNewBotMaxPos(found.maxPos);
+    }
+  };
 
   // Real-time strategies state
   const [strategies, setStrategies] = useState<BotStrategyItem[]>([]);
@@ -189,18 +326,18 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
           status: 'ACTIVE',
           allocation: `$ ${(eq * 0.4).toLocaleString()}`,
           allocatedCapitalVal: eq * 0.4,
-          currentPosition: positions.length > 0 ? `${positions[0].side} ${positions[0].symbol.replace('USDT', '')}` : 'LONG BTC',
-          dailyPnL: portfolio ? `${portfolio.dailyPnL >= 0 ? '+' : '-'}$${Math.abs(portfolio.dailyPnL).toFixed(2)}` : '+$1,248.31',
-          dailyPnLVal: portfolio?.dailyPnL || 1248.31,
-          totalReturn: '+11.01%',
-          winRateRR: '68% | 2.4:1',
-          sparkline: [100, 102, 105, 103, 108, 111],
+          currentPosition: positions.length > 0 ? `${positions[0].side} ${positions[0].symbol.replace('USDT', '')}` : 'FLAT',
+          dailyPnL: portfolio ? `${portfolio.dailyPnL >= 0 ? '+' : '-'}$${Math.abs(portfolio.dailyPnL).toFixed(2)}` : '$0.00',
+          dailyPnLVal: portfolio?.dailyPnL || 0,
+          totalReturn: portfolio && portfolio.initialBalance ? `${(((portfolio.equity - portfolio.initialBalance) / portfolio.initialBalance) * 100).toFixed(2)}%` : '0.00%',
+          winRateRR: tradeHistory.length > 0 ? `${Math.round((tradeHistory.filter(t => (t.realizedPnL || 0) > 0).length / tradeHistory.length) * 100)}%` : '—',
+          sparkline: [100, 100],
           sparkColor: '#00D8F6',
           fusionScore: liveFusionScore,
-          uptime: '1.8Ms',
+          uptime: '1m',
           cycleIntervalSeconds: 30,
-          cyclesCompleted: 142,
-          tradesExecuted: 18,
+          cyclesCompleted: 0,
+          tradesExecuted: tradeHistory.length,
           agentWeights: { technical: 95, sentiment: 70, liquidity: 85, macro: 45, execution: 80 },
           riskLimits: { maxPositionSize: 2.0, dailyDrawdownLimit: 5.0 },
           logs: [],
@@ -215,17 +352,17 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
           allocation: `$ ${(eq * 0.3).toLocaleString()}`,
           allocatedCapitalVal: eq * 0.3,
           currentPosition: 'FLAT',
-          dailyPnL: '+$420.50',
-          dailyPnLVal: 420.5,
-          totalReturn: '+8.52%',
-          winRateRR: '66% | 2.2:1',
-          sparkline: [95, 98, 97, 101, 104, 108.52],
+          dailyPnL: '$0.00',
+          dailyPnLVal: 0,
+          totalReturn: '0.00%',
+          winRateRR: '—',
+          sparkline: [100, 100],
           sparkColor: '#F59E0B',
           fusionScore: 0.65,
-          uptime: '1.2Ms',
+          uptime: '1m',
           cycleIntervalSeconds: 30,
-          cyclesCompleted: 88,
-          tradesExecuted: 12,
+          cyclesCompleted: 0,
+          tradesExecuted: 0,
           agentWeights: { technical: 88, sentiment: 60, liquidity: 75, macro: 50, execution: 70 },
           riskLimits: { maxPositionSize: 2.5, dailyDrawdownLimit: 4.5 },
           logs: [],
@@ -240,17 +377,17 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
           allocation: `$ ${(eq * 0.3).toLocaleString()}`,
           allocatedCapitalVal: eq * 0.3,
           currentPosition: 'FLAT',
-          dailyPnL: '+$215.80',
-          dailyPnLVal: 215.8,
-          totalReturn: '+6.72%',
-          winRateRR: '64% | 2.0:1',
-          sparkline: [102, 100, 104, 107, 106, 106.72],
+          dailyPnL: '$0.00',
+          dailyPnLVal: 0,
+          totalReturn: '0.00%',
+          winRateRR: '—',
+          sparkline: [100, 100],
           sparkColor: '#EF4444',
           fusionScore: 0.58,
-          uptime: '840ks',
+          uptime: '1m',
           cycleIntervalSeconds: 45,
-          cyclesCompleted: 65,
-          tradesExecuted: 9,
+          cyclesCompleted: 0,
+          tradesExecuted: 0,
           agentWeights: { technical: 70, sentiment: 55, liquidity: 92, macro: 40, execution: 85 },
           riskLimits: { maxPositionSize: 1.5, dailyDrawdownLimit: 3.5 },
           logs: [],
@@ -275,6 +412,14 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
   const combinedDailyPnL = useMemo(() => {
     return strategies.reduce((sum, s) => sum + s.dailyPnLVal, 0);
   }, [strategies]);
+
+  const realWinRate = useMemo(() => {
+    if (!tradeHistory || tradeHistory.length === 0) {
+      return portfolio?.winRate ? portfolio.winRate * 100 : 0;
+    }
+    const winning = tradeHistory.filter((t) => (t.realizedPnL || 0) > 0).length;
+    return (winning / tradeHistory.length) * 100;
+  }, [tradeHistory, portfolio?.winRate]);
 
   const activeBotsCount = strategies.filter((s) => s.status === 'ACTIVE').length;
   const paperBotsCount = strategies.filter((s) => s.status === 'PAPER').length;
@@ -573,7 +718,9 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
           <div className="bg-[#0B111E] p-3 rounded-xl border border-[#1E293B] flex items-center justify-between">
             <div>
               <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Real Win Rate</div>
-              <div className="text-lg font-black text-emerald-400 mt-1">68.4%</div>
+              <div className="text-lg font-black text-emerald-400 mt-1">
+                {realWinRate > 0 ? `${realWinRate.toFixed(1)}%` : '0.0%'}
+              </div>
             </div>
             <div className="relative w-8 h-8 flex items-center justify-center">
               <svg width="32" height="32" viewBox="0 0 32 32" className="transform -rotate-90">
@@ -586,7 +733,7 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
                   strokeWidth="3"
                   fill="none"
                   strokeDasharray="75.4"
-                  strokeDashoffset="24.0"
+                  strokeDashoffset={`${75.4 * (1 - Math.min(100, Math.max(0, realWinRate)) / 100)}`}
                   strokeLinecap="round"
                 />
               </svg>
@@ -1099,14 +1246,21 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
               <label className="text-gray-400 block mb-1 font-bold">Strategy Core Preset</label>
               <select
                 value={newBotStrategyPreset}
-                onChange={(e) => setNewBotStrategyPreset(e.target.value)}
-                className="w-full bg-[#080E1A] border border-gray-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-cyan-500"
+                onChange={(e) => handlePresetChange(e.target.value)}
+                className="w-full bg-[#080E1A] border border-gray-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-cyan-500 font-bold"
               >
-                <option value="AI Quant Core">AI Quant Core (Multi-Agent Fusion + LLM)</option>
-                <option value="Momentum Sweep">Momentum Sweep (EMA Cross + VWAP Breakout)</option>
-                <option value="Liquidity Fade">Liquidity Fade (Order Book Imbalance + Mean Reversion)</option>
-                <option value="Volatility Scalper">Volatility Scalper (ATR Expansion + Bollinger Bands)</option>
+                {PREBUILT_STRATEGY_TEMPLATES.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.presetLabel}
+                  </option>
+                ))}
               </select>
+              {(() => {
+                const currentPreset = PREBUILT_STRATEGY_TEMPLATES.find((p) => p.id === newBotStrategyPreset);
+                return currentPreset ? (
+                  <p className="text-[11px] text-cyan-300/80 mt-1 italic">{currentPreset.desc}</p>
+                ) : null;
+              })()}
             </div>
 
             {/* Name */}

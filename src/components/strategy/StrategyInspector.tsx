@@ -66,8 +66,11 @@ export const StrategyInspector: React.FC<StrategyInspectorProps> = ({
 
         {/* Uptime Sub-Bar */}
         <div className="flex justify-between items-center text-[10px] text-gray-400 pt-2 pb-1">
-          <span>Uptime: <strong className="text-gray-200">{strategy.uptime || '1.8Ms'}</strong></span>
-          <span className="text-emerald-400 font-medium">3.1 lime</span>
+          <span>Uptime: <strong className="text-gray-200">{strategy.uptime || 'Active'}</strong></span>
+          <span className="text-emerald-400 font-bold flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            24/7 Engine
+          </span>
         </div>
 
         {/* Current State & Fusion Score Gauge */}
@@ -180,32 +183,23 @@ export const StrategyInspector: React.FC<StrategyInspectorProps> = ({
           </div>
         </div>
 
-        {/* Recent Activity */}
-        <div className="pt-2 pb-1 border-t border-gray-800/80">
-          <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-2">Recent Activity</div>
-          <div className="space-y-1.5 text-xs">
-            <div className="flex items-center justify-between text-[11px]">
-              <div className="flex items-center gap-1.5 truncate">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                <span className="text-gray-300 truncate">{strategy.name} Active</span>
-              </div>
-              <span className="text-[10px] text-gray-500 shrink-0">13h ago</span>
+        {/* Live Status & Allocations */}
+        <div className="pt-2 pb-1 border-t border-gray-800/80 space-y-2">
+          <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Live Allocation & State</div>
+          <div className="p-2 rounded-xl bg-[#080E1A] border border-gray-800 space-y-1 text-[11px]">
+            <div className="flex justify-between">
+              <span className="text-gray-400">Allocated Capital:</span>
+              <span className="font-mono font-bold text-white">{strategy.allocation}</span>
             </div>
-
-            <div className="flex items-center justify-between text-[11px]">
-              <div className="flex items-center gap-1.5 truncate">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                <span className="text-gray-300 truncate">Momentum Sweep v1</span>
-              </div>
-              <span className="text-[10px] text-gray-500 shrink-0">26h ago</span>
+            <div className="flex justify-between">
+              <span className="text-gray-400">Active Position:</span>
+              <span className="font-mono font-bold text-cyan-300">{strategy.currentPosition}</span>
             </div>
-
-            <div className="flex items-center justify-between text-[11px]">
-              <div className="flex items-center gap-1.5 truncate">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                <span className="text-gray-300 truncate">{strategy.name} 30-Day Equity Curve</span>
-              </div>
-              <span className="text-[10px] text-gray-500 shrink-0">26h ago</span>
+            <div className="flex justify-between">
+              <span className="text-gray-400">Total Return:</span>
+              <span className={`font-mono font-bold ${strategy.dailyPnLVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {strategy.totalReturn}
+              </span>
             </div>
           </div>
         </div>
