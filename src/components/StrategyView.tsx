@@ -22,8 +22,9 @@ import {
   Square,
   X,
   CheckCircle2,
-  AlertTriangle,
   RefreshCw,
+  Download,
+  Settings,
 } from 'lucide-react';
 import { SymbolId, MarketSnapshot, PortfolioState, Position, TradeHistoryItem } from '@/types/trading';
 import { featureEngine } from '@/lib/features/engine';
