@@ -1,116 +1,61 @@
-# 📱 AI Quant Trader — Telegram Bot Setup & Command Guide
+# 📱 AI Quant Trader — Telegram Bot Remote Terminal & Automation Guide
 
-This guide walks you through setting up your Telegram bot in under **2 minutes** to receive real-time 24/7 heartbeats, trade execution alerts, position P&L notices, and control your bots interactively from your phone.
-
----
-
-## 🚀 Quick 3-Step Setup
-
-### Step 1: Create your Bot with @BotFather (60 seconds)
-1. Open Telegram on your phone or PC and search for **[@BotFather](https://t.me/BotFather)**.
-2. Click **Start** (or send `/start`).
-3. Send the command:
-   ```text
-   /newbot
-   ```
-4. Enter a display name (e.g. `My AI Quant Trader`).
-5. Enter a username ending in `bot` (e.g. `AyoolaTrader_bot`).
-6. BotFather will reply with your **HTTP API Bot Token**:
-   ```text
-   7182938491:AAHk8q_exampleToken_dJk294Ls910
-   ```
-7. **Copy this token.**
+This guide walks you through interacting with your Telegram bot (**[@Aitraderheartbeatbot](https://t.me/Aitraderheartbeatbot)**) for 24/7 real-time telemetry, remote bot controls, backtesting, and automated 30-minute AI specialist market intelligence briefs.
 
 ---
 
-### Step 2: Get your Chat ID (30 seconds)
-1. Open Telegram and search for your newly created bot (e.g. `@AyoolaTrader_bot`).
-2. Click **Start** (or send `/start` to your bot once — *this allows the bot to message you*).
-3. Search for **[@userinfobot](https://t.me/userinfobot)** and click **Start**.
-4. It will reply immediately with your **Id**:
-   ```text
-   Id: 987654321
-   ```
-5. **Copy this number.**
+## 🎮 Interactive Telegram Commands Cheatsheet
 
----
+Send any of the following commands to your Telegram bot for instant responses:
 
-### Step 3: Connect in AI Quant Trader Settings (30 seconds)
-1. Open the AI Quant Trader web application.
-2. Go to **Settings** in the left sidebar.
-3. Scroll down to **Telegram Real-Time Notifications & 24/7 Heartbeat**.
-4. Paste:
-   - **Telegram Bot Token** (from Step 1)
-   - **Telegram Chat ID** (from Step 2)
-5. Select the notification streams you want enabled:
-   - 💓 **24/7 Heartbeat**
-   - 🚀 **Trade Executions**
-   - 🎯 **Position Exits & P&L**
-   - ⚠️ **Risk Gate Warnings**
-6. Click **"Send Test Heartbeat to Telegram"** to verify delivery.
-7. Click **"Save Configuration"** at the top right.
-
----
-
-## 🎮 Interactive Two-Way Commands Cheatsheet
-
-Once connected, you can message your bot directly from Telegram with any of the following commands:
-
-| Command | Description | Example Output |
+### 1. 📊 System Status & Telemetry
+| Command | Description | Response Details |
 | :--- | :--- | :--- |
-| **`/start`** or **`/help`** | Displays the interactive command menu. | List of all commands and quick action buttons |
-| **`/status`** or **`/dashboard`** | Instant overview of portfolio equity, cash balance, and 24h P&L. | `$85,000 Equity · +$1,248.31 Today · 68.4% Win Rate` |
-| **`/bots`** | Lists all running and paused AI quant bots and individual performance. | `AI Quant Core (BTC): +$1,248.31 · Momentum (ETH): +$420.50` |
-| **`/positions`** | Displays all open positions, entry prices, mark prices, and distance to TP/SL. | `LONG BTC 0.35 @ $63,850 · Mark $64,720 (+$304.50)` |
-| **`/market [symbol]`** | Live real-time ticker, 24h range, RSI, ATR, and AI specialist agent consensus. | `BTC/USDT $64,250 (+2.45%) · 92% Bullish Consensus` |
-| **`/startbot [symbol]`** | Activates or deploys an autonomous AI quant bot on that pair. | `🟢 Bot Activated for BTCUSDT (24/7 Cloud Cycle)` |
-| **`/stopbot [symbol]`** | Pauses or stops an active bot on that pair. | `🟡 Bot Paused for BTCUSDT` |
-| **`/closeall`** | 🚨 **Emergency Panic Button**: Instantly liquidates all positions across Alpaca & Paper broker! | `🚨 Closed all positions across Alpaca & Paper Broker. Flat.` |
-| **`/report`** | Full quantitative performance attribution breakdown. | `Sharpe 2.14 · Sortino 3.42 · Profit Factor 2.38` |
+| **`/status`** or **`/dashboard`** | Portfolio equity, available cash, and 24h P&L. | Total equity, margin, daily drawdown, win rate %, and Render status. |
+| **`/heartbeat`** or **`/health`** | Server & cloud infrastructure health. | Render uptime (mins), Node.js memory (MB), active WebSocket streams, database connectivity. |
+| **`/bots`** | Roster of active cloud trading bots. | List of bots, symbols, allocated capital, live P&L ($ / %), and trades executed. |
+| **`/positions`** | Open positions across brokers. | Asset, side (LONG/SHORT), size, entry price, mark price, unrealized P&L, TP/SL levels. |
+| **`/trades`** or **`/history`** | Last 10 executed trade fills. | Symbol, side, fill price, size, realized P&L, and exit reason (`TAKE_PROFIT` / `STOP_LOSS`). |
+| **`/exchange`** | Multi-exchange connectivity check. | Binance live feed ping (18ms), Alpaca Broker API v2 status, and Hyperliquid L1 Smart Money stream. |
+| **`/agents`** | 8 Specialist AI agent consensus. | Technical, Liquidity, Positioning, Momentum, Volatility, Macro, Regime, Execution scores & dominant bias. |
+| **`/strategies`** | Strategy blueprint catalog. | Hawk (Volatility), Camel (Momentum), WhaleHunter (Smart Money), Viper (Mean Reversion), Hornet (HFT), AI Core v1.3. |
+| **`/backtest [symbol]`** | Instant quantitative backtest. | 90-day simulated metrics (e.g. `/backtest btc`): Profit Factor, Sharpe 2.34, Win Rate 71.2%, Max Drawdown -5.18%. |
+| **`/market [symbol]`** | Real-time market radar. | Live 24h high/low, RSI, ATR, order book bid imbalance, and specialist agent signals (e.g. `/market eth`). |
+| **`/report`** | Performance attribution report. | Profit factor, Sharpe, Sortino, max drawdown, win rate, and average hold time. |
+| **`/help`** | Full command reference menu. | Formatted cheatsheet with quick action buttons. |
 
-/heartbeat / /health: System uptime, memory usage, Render process health, active WebSocket streams.
-/bots: List all deployed cloud bots (ID, Name, Symbol, Status, Capital, Running PnL).
-/bot <create|pause|resume|stop> <botId or symbol>: Direct remote control to pause, resume, stop, or create bots from Telegram chat.
-/exchange: Check live connectivity to Binance, Alpaca, and Hyperliquid with balance telemetry.
-/strategies: Institutional strategy blueprint catalog.
-/backtest <symbol>: Run quick quantitative backtest and return win rate, profit factor, and Sharpe.
-/trades / /history: Last 10 executed trade fills with realized P&L and reason.
-/agents: Status and bias of all 8 specialist agents.
-/help: Complete formatted command cheatsheet.
 ---
 
-## 📡 Automatic Alerts You Will Receive
+### 2. 🤖 Remote Bot Controls
+Control your autonomous trading bots from anywhere directly inside Telegram chat:
 
-### 1. 💓 24/7 Heartbeat Telemetry
-- **When**: Scheduled / periodic interval.
-- **Includes**: Live Equity, Free Margin, Daily P&L, Active Bots Online, Feed Latency, and Market Regime.
+| Command | Action | Example |
+| :--- | :--- | :--- |
+| **`/bot pause [id/symbol]`** | Temporarily pause trading loop while holding positions. | `/bot pause btc` |
+| **`/bot resume [id/symbol]`** | Resume 24/7 cloud execution loop. | `/bot resume btc` |
+| **`/bot stop [id/symbol]`** | Deactivate bot on asset. | `/bot stop eth` |
+| **`/bot create [symbol] [capital]`** | Deploy a new autonomous AI bot. | `/bot create SOL 5000` |
+| **`/closeall`** | 🚨 **Emergency Panic Button**: Instantly liquidates all positions across Alpaca & Paper broker! | `/closeall` |
+
+---
+
+## 📡 Automated Broadcast Telemetry (Push Notifications)
+
+### 1. 🧠 30-Minute AI Market Intelligence Brief
+- **Cadence**: Sent automatically every **30 minutes**.
+- **Content**:
+  - Live asset price and regime classification (`TRENDING_UP`, `TRANSITION`, `SIDEWAYS`).
+  - Overall AI Fusion consensus (`🟢 BULLISH BUY`, `🔴 BEARISH SELL`, `🔵 NEUTRAL`).
+  - Top specialist agent voting breakdown (Technical, Liquidity, Whale Positioning, Momentum, Macro).
+  - LLM synthesis and market driver explanation.
 
 ### 2. 🚀 Instant Trade Execution Alerts
-- **When**: Any AI bot or manual trade executes.
-- **Includes**: Side (`🟢 BUY` / `🔴 SELL`), Symbol, Size, Fill Price, Notional Value ($), Take-Profit, Stop-Loss, and AI Specialist Agent rationale.
+- **Trigger**: Fired immediately whenever a bot executes an order.
+- **Content**: Side (`🟢 BUY` / `🔴 SELL`), Symbol, Size, Fill Price, Notional Value ($), Take-Profit, Stop-Loss, and AI Specialist Agent rationale.
 
-### 3. 🎯 Position Close & Realized P&L Alerts
-- **When**: A trade hits Take-Profit, Stop-Loss, or is closed.
-- **Includes**: Realized P&L (`🎉 WIN (+$304.50 / +2.4R)` or `🛑 STOP LOSS`), Return %, and exit reason.
+### 3. 🎯 Position Exit & Realized P&L Alerts
+- **Trigger**: Fired when Take-Profit or Stop-Loss is reached.
+- **Content**: Realized P&L (`🎉 WIN (+$405.00 / +2.8R)` or `🛑 LOSS`), Return %, and exit reason.
 
-### 4. 🧠 AI Specialist Agent Consensus Radar
-- **When**: Deep AI signal fusion evaluates an entry setup.
-- **Includes**: Voting matrix of Technical, Order Flow, Volatility, Mean Reversion, and Macro specialist agents.
-
-### 5. ⚠️ Risk Gate & Emergency Warnings
-- **When**: High market volatility, daily drawdown proximity, or broker disconnects occur.
-
----
-
-## 🌐 Enabling Webhook for Two-Way Commands on Vercel
-
-When deploying on Vercel:
-1. Open your browser and visit:
-   ```text
-   https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook?url=https://<YOUR_VERCEL_DOMAIN>/api/notifications/telegram/webhook
-   ```
-2. You will see:
-   ```json
-   { "ok": true, "result": true, "description": "Webhook was set" }
-   ```
-3. Your bot is now fully interactive 24/7!
+### 4. ⚠️ Risk Gate & Emergency Warnings
+- **Trigger**: Fired when drawdown limits, slippage gates, or volatility safeguards are triggered.
