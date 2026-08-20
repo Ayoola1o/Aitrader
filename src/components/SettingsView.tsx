@@ -72,7 +72,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [lastCheckSeconds, setLastCheckSeconds] = useState(14);
 
   // ── Core Risk & Trading Settings ─────────────────────────────────────────────
-  const [tradingMode, setTradingMode] = useState<'PAPER' | 'SHADOW' | 'LIVE'>('PAPER');
+  const [tradingMode, setTradingMode] = useState<AppMode>('PAPER');
   const [maxRisk, setMaxRisk] = useState<number>(DEFAULT_SETTINGS.maxRisk);
   const [maxDrawdown, setMaxDrawdown] = useState<number>(DEFAULT_SETTINGS.maxDrawdown);
   const [minRR, setMinRR] = useState<number>(DEFAULT_SETTINGS.minRR);

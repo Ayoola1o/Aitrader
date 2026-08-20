@@ -172,7 +172,8 @@ export class PaperBroker {
     stopLoss: number,
     takeProfit: number,
     source: 'AI' | 'MANUAL' = 'MANUAL',
-    decisionId?: string
+    decisionId?: string,
+    orderBook?: any
   ): { success: boolean; message: string; orderId?: string } {
     this.orderCounter++;
     const orderId = `ORD-${Date.now()}-${String(this.orderCounter).padStart(4, '0')}`;
@@ -184,6 +185,7 @@ export class PaperBroker {
       side,
       size,
       marketPrice,
+      orderBook,
     });
 
     const notional = fill.fillPrice * fill.filledSize;
@@ -225,7 +227,7 @@ export class PaperBroker {
     };
   }
 
-  closePosition(posId: string, currentPrice: number, reason: 'TAKE_PROFIT' | 'STOP_LOSS' | 'MANUAL' | 'HARD_GATE'): TradeHistoryItem | null {
+  closePosition(posId: string, currentPrice: number, reason: 'TAKE_PROFIT' | 'STOP_LOSS' | 'MANUAL' | 'HARD_GATE', orderBook?: any): TradeHistoryItem | null {
     const pos = this.positions.get(posId);
     if (!pos) return null;
 
@@ -235,6 +237,7 @@ export class PaperBroker {
       side: pos.side === 'LONG' ? 'SELL' : 'BUY',
       size: pos.size,
       marketPrice: currentPrice,
+      orderBook,
     });
 
     const priceDiff = pos.side === 'LONG' ? fill.fillPrice - pos.entryPrice : pos.entryPrice - fill.fillPrice;

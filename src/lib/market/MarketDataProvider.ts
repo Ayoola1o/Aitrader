@@ -353,6 +353,16 @@ export class MarketDataProvider {
     });
   }
 
+  public async getOrderBook(symbol: SymbolId): Promise<OrderBook> {
+    const snap = await this.getSnapshot(symbol);
+    return snap.orderBook;
+  }
+
+  public async getCandles(symbol: SymbolId): Promise<Candle[]> {
+    const snap = await this.getSnapshot(symbol);
+    return snap.candles;
+  }
+
   // Demo-only helpers
   private buildDemoOrderBook(price: number): OrderBook {
     const bids: OrderBookLevel[] = [];
@@ -401,3 +411,4 @@ export class MarketDataProvider {
 }
 
 export const marketDataProvider = new MarketDataProvider();
+export { MarketDataProvider as MarketDataService, marketDataProvider as marketDataService };

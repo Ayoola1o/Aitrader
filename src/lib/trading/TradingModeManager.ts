@@ -3,7 +3,7 @@
 import { AppMode } from '@/types/trading';
 
 export interface TradingModeDefinition {
-  mode: AppMode | 'LIVE';
+  mode: AppMode;
   name: string;
   description: string;
   allowSyntheticData: boolean;
@@ -12,7 +12,7 @@ export interface TradingModeDefinition {
   enforceStrictHaltOnDisconnect: boolean;
 }
 
-export const TRADING_MODES: Record<string, TradingModeDefinition> = {
+export const TRADING_MODES: Record<AppMode, TradingModeDefinition> = {
   DEMO: {
     mode: 'DEMO',
     name: 'Demo Sandbox Mode',
@@ -52,14 +52,14 @@ export const TRADING_MODES: Record<string, TradingModeDefinition> = {
 };
 
 export class TradingModeManager {
-  private activeMode: AppMode | 'LIVE' = 'PAPER';
+  private activeMode: AppMode = 'PAPER';
   private listeners: Set<(m: TradingModeDefinition) => void> = new Set();
 
   public getActiveMode(): TradingModeDefinition {
     return TRADING_MODES[this.activeMode] || TRADING_MODES.PAPER;
   }
 
-  public setMode(mode: AppMode | 'LIVE') {
+  public setMode(mode: AppMode) {
     this.activeMode = mode;
     const def = this.getActiveMode();
     this.listeners.forEach((cb) => {

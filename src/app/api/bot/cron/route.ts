@@ -10,6 +10,7 @@ import { generateDecisionId } from '@/lib/db/schema';
 import { alpacaBrokerClient, buildPortfolioFromAlpaca } from '@/lib/broker/alpaca';
 import { paperBroker } from '@/lib/broker/paper';
 import { telegramService } from '@/lib/notifications/telegram';
+import { botRuntime } from '@/lib/bot/BotRuntime';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Allow full 60s for Vercel serverless functions
@@ -22,85 +23,96 @@ async function fetchServerMarketSnapshot(symbol: SymbolId): Promise<MarketSnapsh
     XRPUSDT: 'XRP-USD',
   };
 
-  let price = 64250;
-  let bid = 64240;
-  let ask = 64260;
-  let change24h = 1.25;
-  let high24h = 65500;
-  let low24h = 63200;
-  let volume24h = 1250000;
+  let price = 0;
+  let bid = 0;
+  let ask = 0;
+  let change24h = 0;
+  let high24h = 0;
+  let low24h = 0;
+  let volume24h = 0;
   let exchange = 'Binance';
+  let isLive = false;
 
-  // 1. Try Binance Global
+  // 1. Fetch Real Binance Ticker
   try {
     const res = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`, {
       cache: 'no-store',
       headers: { 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(3000),
     });
     if (res.ok) {
       const d = await res.json();
-      price = parseFloat(d.lastPrice) || price;
-      bid = parseFloat(d.bidPrice) || price * 0.9999;
-      ask = parseFloat(d.askPrice) || price * 1.0001;
-      change24h = parseFloat(d.priceChangePercent) || change24h;
-      high24h = parseFloat(d.highPrice) || high24h;
-      low24h = parseFloat(d.lowPrice) || low24h;
-      volume24h = parseFloat(d.volume) || volume24h;
-      exchange = 'Binance';
+      if (d.lastPrice) {
+        price = parseFloat(d.lastPrice);
+        bid = parseFloat(d.bidPrice) || price * 0.9999;
+        ask = parseFloat(d.askPrice) || price * 1.0001;
+        change24h = parseFloat(d.priceChangePercent) || 0;
+        high24h = parseFloat(d.highPrice) || price * 1.015;
+        low24h = parseFloat(d.lowPrice) || price * 0.985;
+        volume24h = parseFloat(d.volume) || 0;
+        exchange = 'Binance';
+        isLive = true;
+      }
     }
-  } catch {
-    // 2. Try Coinbase
-    const cbPair = COINBASE_MAP[symbol];
-    if (cbPair) {
-      try {
-        const res = await fetch(`https://api.exchange.coinbase.com/products/${cbPair}/ticker`, { cache: 'no-store' });
-        if (res.ok) {
-          const t = await res.json();
-          price = parseFloat(t.price) || price;
-          bid = parseFloat(t.bid) || price * 0.9999;
-          ask = parseFloat(t.ask) || price * 1.0001;
-          exchange = 'Coinbase';
-        }
-      } catch {}
-    }
-  }
+  } catch {}
 
-  // Build synthetic order book levels around current price
+  // 2. Fetch Real Binance L2 Depth
   const bids: OrderBookLevel[] = [];
   const asks: OrderBookLevel[] = [];
   let bidTotal = 0;
   let askTotal = 0;
-  for (let i = 1; i <= 10; i++) {
-    const bPrice = Number((price - i * price * 0.0002).toFixed(2));
-    const aPrice = Number((price + i * price * 0.0002).toFixed(2));
-    const bSize = Number((Math.exp(-i * 0.2) * 2.5).toFixed(4));
-    const aSize = Number((Math.exp(-i * 0.2) * 2.5).toFixed(4));
-    bidTotal += bSize;
-    askTotal += aSize;
-    bids.push({ price: bPrice, size: bSize, total: bidTotal });
-    asks.push({ price: aPrice, size: aSize, total: askTotal });
-  }
 
-  // Build 100 1m candles
-  const now = Date.now();
-  const candles = [];
-  let p = price * 0.985;
-  for (let i = 100; i >= 0; i--) {
-    const chg = Math.sin(i * 0.2) * 0.002 + 0.0001;
-    const open = p;
-    const close = p * (1 + chg);
-    const high = Math.max(open, close) * 1.0006;
-    const low = Math.min(open, close) * 0.9994;
-    candles.push({
-      time: now - i * 60000,
-      open,
-      high,
-      low,
-      close,
-      volume: 50 + Math.abs(chg) * 2000,
+  try {
+    const depthRes = await fetch(`https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=20`, {
+      cache: 'no-store',
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(2500),
     });
-    p = close;
-  }
+    if (depthRes.ok) {
+      const d = await depthRes.json();
+      if (Array.isArray(d.bids) && Array.isArray(d.asks)) {
+        d.bids.slice(0, 15).forEach((b: [string, string]) => {
+          const sz = parseFloat(b[1]);
+          bidTotal += sz;
+          bids.push({ price: parseFloat(b[0]), size: sz, total: bidTotal });
+        });
+        d.asks.slice(0, 15).forEach((a: [string, string]) => {
+          const sz = parseFloat(a[1]);
+          askTotal += sz;
+          asks.push({ price: parseFloat(a[0]), size: sz, total: askTotal });
+        });
+      }
+    }
+  } catch {}
+
+  // 3. Fetch Real Binance 1m Candles
+  const now = Date.now();
+  const candles: Array<{ time: number; open: number; high: number; low: number; close: number; volume: number }> = [];
+
+  try {
+    const klinesRes = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1m&limit=60`, {
+      cache: 'no-store',
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(2500),
+    });
+    if (klinesRes.ok) {
+      const kData = await klinesRes.json();
+      if (Array.isArray(kData)) {
+        kData.forEach((k: any) => {
+          candles.push({
+            time: k[0],
+            open: parseFloat(k[1]),
+            high: parseFloat(k[2]),
+            low: parseFloat(k[3]),
+            close: parseFloat(k[4]),
+            volume: parseFloat(k[5]),
+          });
+        });
+      }
+    }
+  } catch {}
+
+  const hasRealData = isLive && price > 0 && bids.length > 0 && candles.length > 0;
 
   return {
     symbol,
@@ -115,35 +127,32 @@ async function fetchServerMarketSnapshot(symbol: SymbolId): Promise<MarketSnapsh
     low24h,
     volume24h,
     candles,
-    recentTrades: [
-      { id: `t1-${now}`, time: now, price, size: 0.15, side: 'BUY' },
-      { id: `t2-${now}`, time: now - 1500, price: bid, size: 0.25, side: 'SELL' },
-    ],
+    recentTrades: [],
     orderBook: {
       bids,
       asks,
       spread: Number((ask - bid).toFixed(2)),
-      spreadPercent: (ask - bid) / price,
-      bidAskImbalance: 0.12,
+      spreadPercent: price > 0 ? (ask - bid) / price : 0,
+      bidAskImbalance: bidTotal + askTotal > 0 ? (bidTotal - askTotal) / (bidTotal + askTotal) : 0,
       bidDepth: bidTotal,
       askDepth: askTotal,
       midPrice: (bid + ask) / 2,
     },
-    fundingRate: 0.0001,
-    openInterest: 15000000,
-    openInterestChange24h: 2.3,
-    longShortRatio: 1.15,
-    liquidations24h: { longs: 250000, shorts: 180000 },
+    fundingRate: 0,
+    openInterest: 0,
+    openInterestChange24h: 0,
+    longShortRatio: 1.0,
+    liquidations24h: { longs: 0, shorts: 0 },
     dataQuality: {
-      tickerStatus: 'LIVE',
-      orderBookStatus: 'LIVE',
-      tradesStatus: 'LIVE',
-      candlesStatus: 'LIVE',
-      fundingStatus: 'LIVE',
-      openInterestStatus: 'LIVE',
-      macroStatus: 'LIVE',
-      overallScore: 98,
-      criticalStale: false,
+      tickerStatus: hasRealData ? 'LIVE' : 'UNAVAILABLE',
+      orderBookStatus: bids.length > 0 ? 'LIVE' : 'UNAVAILABLE',
+      tradesStatus: hasRealData ? 'LIVE' : 'UNAVAILABLE',
+      candlesStatus: candles.length > 0 ? 'LIVE' : 'UNAVAILABLE',
+      fundingStatus: 'UNAVAILABLE',
+      openInterestStatus: 'UNAVAILABLE',
+      macroStatus: 'UNAVAILABLE',
+      overallScore: hasRealData ? 95 : 0,
+      criticalStale: !hasRealData,
       lastUpdated: now,
     },
     appMode: 'PAPER',
@@ -191,135 +200,93 @@ async function handleCronCycle(req: NextRequest) {
       },
     ];
 
-    // 2. Fetch fresh market snapshot
-    const snap = await fetchServerMarketSnapshot(symbol);
+    // 2. Execute Universal Bot Runtime Pipeline (Item 6 & 7)
+    const runtimeResult = await botRuntime.executeCycle({
+      symbol,
+      allocatedCapital,
+      riskPercent: 0.5,
+      mode: 'PAPER',
+    });
+
+    const snap = runtimeResult.snapshot;
     cycleLogs.push({
       id: ++logId,
       time: Date.now(),
       level: 'INFO',
-      message: `Live Price: $${snap.price.toLocaleString()} · Exchange: ${snap.exchange}`,
+      message: `Live Price: $${snap.price.toLocaleString()} · Status: ${snap.dataQuality.tickerStatus}`,
     });
 
-    // 3. Compute Features
-    const feat = featureEngine.calculateFeatures(snap);
+    let executed = runtimeResult.tradeExecuted || false;
+    let lastAction = `Cycle #${cycleCount}: ${runtimeResult.logMessage}`;
 
-    // 4. Run Specialist Agents & Signal Fusion
-    const { signals, regime } = specialistAgentSystem.evaluateAllAgents(snap, feat);
-    const fusion = signalFusionEngine.fuseSignals(signals, regime);
-    cycleLogs.push({
-      id: ++logId,
-      time: Date.now(),
-      level: 'INFO',
-      message: `Fusion → ${fusion.dominantAction} (BUY ${(fusion.buyScore * 100).toFixed(0)}% / SELL ${(fusion.sellScore * 100).toFixed(0)}%) · Regime: ${regime}`,
-    });
+    if (runtimeResult.halted) {
+      cycleLogs.push({
+        id: ++logId,
+        time: Date.now(),
+        level: 'ERROR',
+        message: runtimeResult.logMessage,
+      });
+    } else if (runtimeResult.evalResult) {
+      const { decision: dec, riskCheck: risk, fusion, regime } = runtimeResult.evalResult;
 
-    // 5. Generate LLM Structured Decision
-    const decId = generateDecisionId();
-    const dec: LLMDecision = await aiProviderManager.generateStructuredDecision(snap, feat, signals, fusion, regime);
-    dec.decisionId = decId;
+      cycleLogs.push({
+        id: ++logId,
+        time: Date.now(),
+        level: 'INFO',
+        message: `Fusion → ${fusion.dominantAction} · Regime: ${regime} · Decision: ${dec.action} (${(dec.confidence * 100).toFixed(0)}%)`,
+      });
 
-    cycleLogs.push({
-      id: ++logId,
-      time: Date.now(),
-      level: 'INFO',
-      message: `AI Decision: ${dec.action} (Confidence: ${(dec.confidence * 100).toFixed(0)}%) · ${dec.reasoning[0] ?? ''}`,
-    });
-
-    // 6. Portfolio State & Risk Engine Gate
-    paperBroker.updatePrices({ [symbol]: snap.price } as Record<SymbolId, number>);
-    const port = paperBroker.getPortfolioState(snap.price);
-    const risk = deterministicRiskEngine.evaluate(dec, port, snap, feat);
-
-    let executed = false;
-    let lastAction = `Cycle #${cycleCount}: ${dec.action}`;
-
-    if (risk.approved && (dec.action === 'BUY' || dec.action === 'SELL')) {
-      const side = dec.action === 'BUY' ? 'BUY' : 'SELL';
-      const capital = Math.min(allocatedCapital, port.freeMargin || allocatedCapital);
-      let size = snap.price > 0 ? (capital * 0.25) / snap.price : 0.01;
-      size = Number(size.toFixed(symbol === 'BTCUSDT' ? 4 : symbol === 'ETHUSDT' ? 3 : 2));
-      if (size <= 0) size = 0.001;
-
-      const sl = dec.stopLoss ?? (side === 'BUY' ? snap.price * 0.985 : snap.price * 1.015);
-      const tp = dec.takeProfit ?? (side === 'BUY' ? snap.price * 1.03 : snap.price * 0.97);
-
-      // Execute on Paper broker or Alpaca
-      const res = paperBroker.submitOrder(symbol, side, size, snap.price, sl, tp, 'AI', dec.decisionId);
-
-      if (res.success) {
-        executed = true;
+      if (executed) {
         tradesExecuted++;
         consecutiveNoTrades = 0;
-        const notionalVal = (size * snap.price).toFixed(2);
-        lastAction = `EXECUTED ${side} ${size} ${symbol} (~$${notionalVal})`;
         cycleLogs.push({
           id: ++logId,
           time: Date.now(),
           level: 'ACTION',
-          message: `✓ EXECUTED: ${side} ${size} ${symbol} (~$${notionalVal}) — SL:$${sl.toFixed(2)} TP:$${tp.toFixed(2)}`,
+          message: runtimeResult.logMessage,
         });
-
-        // Dispatch instant Telegram alert
-        telegramService.sendTradeExecutionAlert({
-          symbol,
-          side,
-          size,
-          price: snap.price,
-          notional: Number(notionalVal),
-          takeProfit: tp,
-          stopLoss: sl,
-          decisionReason: dec.reasoning[0] || 'AI Specialist Agent consensus',
-          source: 'AI_BOT',
-        }).catch(() => {});
+      } else if (dec.action === 'NO_TRADE' || dec.action === 'HOLD') {
+        consecutiveNoTrades++;
+        cycleLogs.push({
+          id: ++logId,
+          time: Date.now(),
+          level: 'INFO',
+          message: `No Trade (${dec.action}) — ${dec.reasoning[0] ?? ''}`,
+        });
       } else {
         consecutiveNoTrades++;
         cycleLogs.push({
           id: ++logId,
           time: Date.now(),
           level: 'WARN',
-          message: `Order rejected: ${res.message}`,
-        });
-      }
-    } else {
-      consecutiveNoTrades++;
-      if (dec.action === 'NO_TRADE' || dec.action === 'HOLD') {
-        cycleLogs.push({
-          id: ++logId,
-          time: Date.now(),
-          level: 'INFO',
-          message: `No trade executed: ${dec.action} (${dec.reasoning[0] || 'Conditions not met'})`,
-        });
-      } else {
-        cycleLogs.push({
-          id: ++logId,
-          time: Date.now(),
-          level: 'WARN',
-          message: `Risk gate rejected: ${risk.failedGates[0] || 'Limits exceeded'}`,
+          message: `Risk Gate Rejected: ${risk.failedGates[0] ?? 'Risk threshold exceeded'}`,
         });
       }
     }
 
     // 7. Periodically Broadcast 30-Minute AI Specialist Consensus to Telegram
     const is30MinMark = cycleCount === 1 || cycleCount % 60 === 0 || Date.now() % 1800000 < 60000;
-    if (is30MinMark) {
+    if (is30MinMark && runtimeResult.evalResult) {
+      const evalRes = runtimeResult.evalResult;
       telegramService.sendAIMarketConsensusBrief({
         symbol,
         price: snap.price,
-        regime: feat.adx > 25 ? 'TRENDING_UP' : 'SIDEWAYS',
-        fusionScore: fusion.buyScore || fusion.confidence,
-        dominantAction: dec.action,
-        confidence: dec.confidence,
-        agents: signals.map((s) => ({
+        regime: evalRes.regime,
+        fusionScore: evalRes.fusion.buyScore || evalRes.fusion.confidence,
+        dominantAction: evalRes.decision.action,
+        confidence: evalRes.decision.confidence,
+        agents: evalRes.signals.map((s) => ({
           name: s.agentName,
           bias: s.bias,
           conf: s.confidence,
         })),
-        llmRationale: dec.reasoning[0],
+        llmRationale: evalRes.decision.reasoning[0],
       }).catch(() => {});
     }
 
     // 8. Update Supabase with cycle results
     const updatedLogs = [...cycleLogs, ...existingLogs].slice(0, 60);
+    const decAction = runtimeResult.evalResult?.decision?.action || 'NO_TRADE';
 
     const updatedRecord: Partial<BotSessionRecord> & { session_id: string } = {
       session_id: activeSession.session_id,
@@ -328,7 +295,7 @@ async function handleCronCycle(req: NextRequest) {
       final_pnl: runningPnL,
       status: 'RUNNING',
       last_action: lastAction,
-      last_decision_action: dec.action,
+      last_decision_action: decAction,
       consecutive_no_trades: consecutiveNoTrades,
       consecutive_losses: consecutiveLosses,
       current_price: snap.price,
@@ -343,7 +310,7 @@ async function handleCronCycle(req: NextRequest) {
       cycleCount,
       symbol,
       price: snap.price,
-      decision: dec.action,
+      decision: decAction,
       tradesExecuted,
       logsGenerated: cycleLogs.length,
       timestamp: new Date().toISOString(),

@@ -5,6 +5,7 @@ import { supabaseManager } from '@/lib/db/supabase';
 import { marketDataProvider } from '@/lib/market/MarketDataProvider';
 import { tradingDecisionEngine } from '@/lib/engine/TradingDecisionEngine';
 import { paperBroker } from '@/lib/broker/paper';
+import { botRuntime } from '@/lib/bot/BotRuntime';
 
 export interface CloudBotInstance {
   id: string;
@@ -95,44 +96,25 @@ export class CloudBotScheduler {
     await Promise.all(
       activeBots.map(async (bot) => {
         try {
-          // 1. Fetch live snapshot
-          const snap = await marketDataProvider.getSnapshot(bot.symbol);
-
-          // Halt if unverified market data in paper mode
-          if (snap.status === 'UNAVAILABLE' || snap.dataQuality.criticalStale) {
-            bot.status = 'PAUSED';
-            errors.push(`Bot ${bot.name} paused: Live market feed unavailable on ${bot.symbol}`);
-            return;
-          }
-
-          // 2. Evaluate unified decision engine
-          const port = paperBroker.getPortfolioState(snap.price);
-          const evalRes = await tradingDecisionEngine.evaluate({
-            snapshot: snap,
-            portfolio: port,
+          const res = await botRuntime.executeCycle({
+            symbol: bot.symbol,
             allocatedCapital: bot.allocatedCapital,
             riskPercent: 0.5,
+            mode: 'PAPER',
           });
 
           bot.cycleCount++;
           bot.lastCycleAt = Date.now();
-          processedCount++;
 
-          // 3. Execute trade if approved
-          if (evalRes.riskCheck.approved && (evalRes.decision.action === 'BUY' || evalRes.decision.action === 'SELL')) {
-            const res = paperBroker.submitOrder(
-              bot.symbol,
-              evalRes.decision.action,
-              evalRes.positionSizing.sizeUnits,
-              snap.price,
-              evalRes.decision.stopLoss || 0,
-              evalRes.decision.takeProfit || 0,
-              'AI',
-              `DEC-${Date.now()}`
-            );
-            if (res.success) {
-              bot.tradesExecuted++;
-            }
+          if (res.halted) {
+            bot.status = 'PAUSED';
+            errors.push(`Bot ${bot.name} paused: ${res.haltReason}`);
+            return;
+          }
+
+          processedCount++;
+          if (res.tradeExecuted) {
+            bot.tradesExecuted++;
           }
         } catch (err: any) {
           errors.push(`Bot ${bot.name} error: ${err?.message || String(err)}`);

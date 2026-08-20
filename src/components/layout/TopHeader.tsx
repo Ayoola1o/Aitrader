@@ -72,9 +72,11 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
         {/* Mode Pill */}
         <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0B111E] border border-[#1E293B] text-[11px] font-semibold text-gray-300">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="hidden sm:inline">{appMode === 'DEMO' ? 'DEMO MODE' : 'PAPER MODE'}</span>
-          <span className="sm:hidden">PAPER</span>
+          <span className={`w-1.5 h-1.5 rounded-full ${appMode === 'LIVE' ? 'bg-rose-400 animate-pulse' : appMode === 'DEMO' ? 'bg-purple-400' : appMode === 'REPLAY' ? 'bg-cyan-400' : 'bg-emerald-400 animate-pulse'}`} />
+          <span className="hidden sm:inline">
+            {appMode === 'DEMO' ? 'DEMO MODE' : appMode === 'REPLAY' ? 'REPLAY MODE' : appMode === 'LIVE' ? 'LIVE MODE' : 'PAPER MODE'}
+          </span>
+          <span className="sm:hidden">{appMode}</span>
         </div>
 
         {/* Exchange Dropdown */}

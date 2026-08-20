@@ -4,7 +4,7 @@ export type TimeFrame = '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
 
 export type ActionType = 'BUY' | 'SELL' | 'HOLD' | 'NO_TRADE';
 
-export type AppMode = 'DEMO' | 'PAPER' | 'REPLAY';
+export type AppMode = 'DEMO' | 'REPLAY' | 'PAPER' | 'LIVE';
 
 export type DataStatus =
   | 'LIVE'

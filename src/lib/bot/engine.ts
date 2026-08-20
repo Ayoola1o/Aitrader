@@ -11,6 +11,7 @@ import { paperBroker } from '@/lib/broker/paper';
 import { alpacaBrokerClient, buildPortfolioFromAlpaca } from '@/lib/broker/alpaca';
 import { dbPersistence, generateDecisionId } from '@/lib/db/schema';
 import { tradingDecisionEngine } from '@/lib/engine/TradingDecisionEngine';
+import { botRuntime } from '@/lib/bot/BotRuntime';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 export type BotStatus = 'IDLE' | 'RUNNING' | 'PAUSED' | 'STOPPING' | 'STOPPED';
@@ -224,62 +225,52 @@ export class TradingBotEngine {
     this.push();
 
     try {
-      // 1. Market data
-      const snap = await marketEngine.tick(sym);
-      this.state.currentPrice = snap.price;
+      const runtimeResult = await botRuntime.executeCycle({
+        symbol: sym,
+        allocatedCapital: this.config.allocatedCapital,
+        riskPercent: 0.5,
+        mode: 'PAPER',
+      });
 
-      if (snap.dataQuality.criticalStale || snap.price <= 0 || snap.dataQuality.tickerStatus === 'UNAVAILABLE') {
-        this.log('ERROR', `LIVE MARKET DATA UNAVAILABLE on ${sym} — HALTING BOT FOR SAFETY (Zero synthetic data allowed in Paper mode).`);
+      if (runtimeResult.halted) {
+        this.log('ERROR', runtimeResult.logMessage);
         this.triggerExitRequest({
-          reason: `Market data feed lost or stale on ${sym} (Zero synthetic data allowed in Paper mode). Bot safely halted.`,
+          reason: runtimeResult.haltReason || 'Halted by BotRuntime fail-closed safety policy.',
           urgent: true,
           triggeredAt: Date.now(),
         });
         return;
       }
 
-      this.log('INFO', `Price: $${snap.price.toLocaleString()} · Spread: ${(snap.orderBook.spreadPercent * 100).toFixed(4)}%`);
+      const snap = runtimeResult.snapshot;
+      this.state.currentPrice = snap.price;
 
-      // 2. Portfolio state
-      const port = await this.getPortfolio(sym, snap.price);
-      this.state.runningPnL = port.totalPnL;
+      if (runtimeResult.evalResult) {
+        const { decision: dec, riskCheck: risk } = runtimeResult.evalResult;
+        this.state.currentDecision = dec;
+        this.state.lastDecisionAction = dec.action;
+        this.state.currentRiskCheck = risk;
+        this.log('INFO', runtimeResult.logMessage);
 
-      // 3. Unified Trading Decision Engine
-      const evalResult = await tradingDecisionEngine.evaluate({
-        snapshot: snap,
-        portfolio: port,
-        allocatedCapital: this.config.allocatedCapital,
-        riskPercent: 0.5,
-      });
-
-      const { decision: dec, riskCheck: risk, fusion, regime } = evalResult;
-      dec.decisionId = generateDecisionId();
-      this.state.currentDecision = dec;
-      this.state.lastDecisionAction = dec.action;
-      this.state.currentRiskCheck = risk;
-
-      dbPersistence.saveDecisionLog(sym, snap.price, dec);
-      this.log('INFO', `Fusion → ${fusion.dominantAction} · Regime: ${regime} · LLM Decision: ${dec.action} (${(dec.confidence * 100).toFixed(0)}%)`);
-
-      // 4. Execute trade if approved
-      if (risk.approved && (dec.action === 'BUY' || dec.action === 'SELL')) {
-        await this.executeTrade(sym, dec, risk, snap, port);
-      } else if (dec.action === 'NO_TRADE' || dec.action === 'HOLD') {
-        this.state.consecutiveNoTrades++;
-        this.log('INFO', `No trade: ${dec.action} — ${dec.reasoning[0] ?? 'Conditions not met'}`);
-      } else {
-        this.state.consecutiveNoTrades++;
-        this.log('WARN', `Risk gate rejected: ${risk.failedGates[0] ?? 'Unknown gate'}`);
+        if (runtimeResult.tradeExecuted) {
+          this.state.tradesExecuted++;
+        } else {
+          this.state.consecutiveNoTrades++;
+        }
       }
 
       // Update consecutive losses from history
       await this.updateLossCounter();
 
-      // 8. Check exit conditions
-      const exitReq = this.checkExitConditions(port, dec);
-      if (exitReq) {
-        this.triggerExitRequest(exitReq);
-        return;
+      // Check exit conditions
+      const port = await this.getPortfolio(sym, snap.price);
+      this.state.runningPnL = port.totalPnL;
+      if (this.state.currentDecision) {
+        const exitReq = this.checkExitConditions(port, this.state.currentDecision);
+        if (exitReq) {
+          this.triggerExitRequest(exitReq);
+          return;
+        }
       }
 
     } catch (err: any) {

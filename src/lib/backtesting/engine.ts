@@ -10,6 +10,7 @@ import {
 } from '@/types/trading';
 import { tradingDecisionEngine } from '@/lib/engine/TradingDecisionEngine';
 import { paperExecutionEngine } from '@/lib/broker/PaperExecutionEngine';
+import { positionSizingEngine } from '@/lib/risk/PositionSizingEngine';
 
 export interface BacktestConfig {
   symbol: SymbolId;
@@ -191,8 +192,14 @@ export class RealBacktestingEngine {
           const stopLoss = signalAction === 'BUY' ? currentPrice - stopDist * stopLossR : currentPrice + stopDist * stopLossR;
           const takeProfit = signalAction === 'BUY' ? currentPrice + stopDist * takeProfitR : currentPrice - stopDist * takeProfitR;
 
-          const riskDollars = equity * (riskPerTrade / 100);
-          const sizeUnits = Math.min(riskDollars / stopDist, (equity * 0.25) / currentPrice);
+          const sizing = positionSizingEngine.calculateSize({
+            accountEquity: equity,
+            riskPercent: riskPerTrade,
+            entryPrice: currentPrice,
+            stopLossPrice: stopLoss,
+            symbol,
+          });
+          const sizeUnits = sizing.sizeUnits;
 
           const fill = paperExecutionEngine.executeMarketOrder({
             orderId: `BT-ENT-${i}`,

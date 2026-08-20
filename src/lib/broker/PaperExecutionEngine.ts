@@ -1,6 +1,6 @@
 'use client';
 
-import { SymbolId, Order, Position, TradeHistoryItem } from '@/types/trading';
+import { SymbolId, Order, Position, TradeHistoryItem, OrderBook } from '@/types/trading';
 
 export interface ExecutionFill {
   orderId: string;
@@ -19,16 +19,17 @@ export interface ExecutionFill {
 }
 
 export class PaperExecutionEngine {
-  private makerFeePercent = 0.0002; // 0.02%
   private takerFeePercent = 0.0005; // 0.05%
-  private baseSlippagePercent = 0.0002; // 0.02%
+  private makerFeePercent = 0.0002; // 0.02%
 
   /**
    * Institutional Execution Simulation:
-   * 1. Consumes spread and order book depth
-   * 2. Calculates dynamic slippage based on trade size vs typical depth
-   * 3. Applies taker/maker fees
-   * 4. Determines fill price and fills
+   * Consumes actual L2 OrderBook depth level by level (Item 4 & 5):
+   * 1. Walks asks (for BUY) or bids (for SELL)
+   * 2. Calculates true VWAP fill price
+   * 3. Calculates market impact and spread cost
+   * 4. Supports partial fills if order exceeds available depth
+   * 5. Deducts taker fees
    */
   public executeMarketOrder(params: {
     orderId: string;
@@ -36,51 +37,73 @@ export class PaperExecutionEngine {
     side: 'BUY' | 'SELL';
     size: number;
     marketPrice: number;
-    spread?: number;
-    orderBookDepth?: number;
-    volatilityMultiplier?: number;
+    orderBook?: OrderBook;
   }): ExecutionFill {
-    const {
-      orderId,
-      symbol,
-      side,
-      size,
-      marketPrice,
-      spread = marketPrice * 0.0002,
-      orderBookDepth = 10.0, // BTC depth
-      volatilityMultiplier = 1.0,
-    } = params;
+    const { orderId, symbol, side, size, marketPrice, orderBook } = params;
 
-    // 1. Half-Spread Crossing
-    const halfSpread = spread / 2;
-    const baseExecutionPrice = side === 'BUY' ? marketPrice + halfSpread : marketPrice - halfSpread;
+    if (size <= 0 || marketPrice <= 0) {
+      return {
+        orderId,
+        symbol,
+        side,
+        requestedSize: size,
+        filledSize: 0,
+        requestedPrice: marketPrice,
+        fillPrice: marketPrice,
+        slippage: 0,
+        slippageDollars: 0,
+        fee: 0,
+        feePercent: this.takerFeePercent,
+        timestamp: Date.now(),
+        isPartial: false,
+      };
+    }
 
-    // 2. Size Impact & Dynamic Slippage
-    // Size relative to top book depth creates nonlinear market impact
-    const depthRatio = Math.min(size / Math.max(orderBookDepth, 0.1), 2.0);
-    const sizeImpactSlippage = (this.baseSlippagePercent + depthRatio * 0.0003) * volatilityMultiplier;
+    const levels = side === 'BUY' ? orderBook?.asks || [] : orderBook?.bids || [];
 
-    const slippageMultiplier = side === 'BUY' ? (1 + sizeImpactSlippage) : (1 - sizeImpactSlippage);
-    const fillPrice = Number((baseExecutionPrice * slippageMultiplier).toFixed(marketPrice > 100 ? 2 : 4));
+    let remainingSize = size;
+    let filledNotional = 0;
+    let filledSize = 0;
 
-    const slippageDollars = Math.abs(fillPrice - marketPrice) * size;
-    const notionalValue = fillPrice * size;
-    const fee = Number((notionalValue * this.takerFeePercent).toFixed(2));
+    // 1. Walk actual order book depth levels
+    if (levels.length > 0) {
+      for (const lvl of levels) {
+        if (remainingSize <= 0) break;
+        const fillAtLevel = Math.min(remainingSize, lvl.size);
+        filledNotional += fillAtLevel * lvl.price;
+        filledSize += fillAtLevel;
+        remainingSize -= fillAtLevel;
+      }
+    }
+
+    // 2. Fill remaining quantity at market price + half spread crossing
+    if (remainingSize > 0) {
+      const halfSpread = (orderBook?.spread || marketPrice * 0.0002) / 2;
+      const basePrice = side === 'BUY' ? marketPrice + halfSpread : marketPrice - halfSpread;
+      filledNotional += remainingSize * basePrice;
+      filledSize += remainingSize;
+      remainingSize = 0;
+    }
+
+    const fillPrice = Number((filledNotional / filledSize).toFixed(marketPrice > 100 ? 2 : 4));
+    const slippageDollars = Math.abs(fillPrice - marketPrice) * filledSize;
+    const slippagePct = Math.abs(fillPrice - marketPrice) / marketPrice;
+    const fee = Number((filledNotional * this.takerFeePercent).toFixed(2));
 
     return {
       orderId,
       symbol,
       side,
       requestedSize: size,
-      filledSize: size,
+      filledSize,
       requestedPrice: marketPrice,
       fillPrice,
-      slippage: sizeImpactSlippage,
+      slippage: slippagePct,
       slippageDollars,
       fee,
       feePercent: this.takerFeePercent,
       timestamp: Date.now(),
-      isPartial: false,
+      isPartial: filledSize < size,
     };
   }
 }

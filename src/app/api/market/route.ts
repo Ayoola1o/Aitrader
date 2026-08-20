@@ -16,23 +16,49 @@ const ALPACA_CRYPTO_MAP: Record<string, string> = {
   XRPUSDT: 'XRP/USD',
 };
 
-const COINBASE_MAP: Record<string, string> = {
+const COINBASE_PAIR_MAP: Record<string, string> = {
   BTCUSDT: 'BTC-USD',
   ETHUSDT: 'ETH-USD',
   SOLUSDT: 'SOL-USD',
   XRPUSDT: 'XRP-USD',
 };
 
-// ── In-Memory Short TTL Cache (2.5s) to guarantee instant responses ───────────
 interface CacheEntry {
   data: any;
   timestamp: number;
 }
 const marketCache: Record<string, CacheEntry> = {};
 
-// ── Multi-Source Ticker Fetcher ──────────────────────────────────────────────
+// ── 1. Live Ticker Fetcher ───────────────────────────────────────────────────
 async function getLiveTicker(symbol: string) {
-  // 1. Try CoinGecko Public API (Always available & globally accessible)
+  // Try Binance Global REST
+  try {
+    const res = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`, {
+      cache: 'no-store',
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(2500),
+    });
+    if (res.ok) {
+      const d = await res.json();
+      if (d.lastPrice) {
+        const price = parseFloat(d.lastPrice);
+        return {
+          price,
+          bid: parseFloat(d.bidPrice) || price * 0.9999,
+          ask: parseFloat(d.askPrice) || price * 1.0001,
+          change24h: parseFloat(d.priceChangePercent),
+          high24h: parseFloat(d.highPrice),
+          low24h: parseFloat(d.lowPrice),
+          volume24h: parseFloat(d.volume),
+          source: 'binance',
+          status: 'LIVE',
+          fetchedAt: Date.now(),
+        };
+      }
+    }
+  } catch {}
+
+  // Try CoinGecko Public API
   const cgId = COINGECKO_MAP[symbol] || 'bitcoin';
   try {
     const res = await fetch(
@@ -40,7 +66,7 @@ async function getLiveTicker(symbol: string) {
       {
         cache: 'no-store',
         headers: { 'User-Agent': 'Mozilla/5.0' },
-        signal: AbortSignal.timeout(1800),
+        signal: AbortSignal.timeout(2500),
       }
     );
     if (res.ok) {
@@ -51,26 +77,27 @@ async function getLiveTicker(symbol: string) {
         const change24h = parseFloat(coin.usd_24h_change) || 0;
         return {
           price,
-          bid: parseFloat((price * 0.9999).toFixed(price > 10 ? 2 : 4)),
-          ask: parseFloat((price * 1.0001).toFixed(price > 10 ? 2 : 4)),
+          bid: price * 0.9999,
+          ask: price * 1.0001,
           change24h: parseFloat(change24h.toFixed(2)),
-          high24h: parseFloat((price * (1 + Math.max(0.008, Math.abs(change24h / 100)))).toFixed(price > 10 ? 2 : 4)),
-          low24h: parseFloat((price * (1 - Math.max(0.008, Math.abs(change24h / 100)))).toFixed(price > 10 ? 2 : 4)),
-          volume24h: parseFloat(coin.usd_24h_vol) || 1500000000,
+          high24h: price * (1 + Math.max(0.008, Math.abs(change24h / 100))),
+          low24h: price * (1 - Math.max(0.008, Math.abs(change24h / 100))),
+          volume24h: parseFloat(coin.usd_24h_vol) || 0,
           source: 'coingecko',
+          status: 'LIVE',
           fetchedAt: Date.now(),
         };
       }
     }
   } catch {}
 
-  // 2. Try Alpaca Crypto Market Data API
+  // Try Alpaca Crypto
   const alpacaPair = ALPACA_CRYPTO_MAP[symbol] || 'BTC/USD';
   try {
     const res = await fetch(`https://data.alpaca.markets/v1beta3/crypto/us/latest/bars?symbols=${alpacaPair}`, {
       cache: 'no-store',
       headers: { 'User-Agent': 'Mozilla/5.0' },
-      signal: AbortSignal.timeout(3500),
+      signal: AbortSignal.timeout(3000),
     });
     if (res.ok) {
       const d = await res.json();
@@ -86,80 +113,125 @@ async function getLiveTicker(symbol: string) {
           change24h: parseFloat(change24h.toFixed(2)),
           high24h: parseFloat(bar.h) || price * 1.015,
           low24h: parseFloat(bar.l) || price * 0.985,
-          volume24h: parseFloat(bar.v) || 1000,
+          volume24h: parseFloat(bar.v) || 0,
           source: 'alpaca',
+          status: 'LIVE',
           fetchedAt: Date.now(),
         };
       }
     }
   } catch {}
 
-  // 3. Try Binance Global
+  return {
+    price: 0,
+    bid: 0,
+    ask: 0,
+    change24h: 0,
+    high24h: 0,
+    low24h: 0,
+    volume24h: 0,
+    source: 'unverified',
+    status: 'UNAVAILABLE',
+    fetchedAt: Date.now(),
+  };
+}
+
+// ── 2. Real L2 Order Book Depth Fetcher (Zero Math.random) ───────────────────
+async function getLiveOrderBook(symbol: string) {
+  // 1. Try Binance L2 Depth
   try {
-    const res = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`, {
+    const res = await fetch(`https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=20`, {
       cache: 'no-store',
       headers: { 'User-Agent': 'Mozilla/5.0' },
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(2500),
     });
     if (res.ok) {
       const d = await res.json();
-      if (d.lastPrice) {
+      if (Array.isArray(d.bids) && Array.isArray(d.asks) && d.bids.length > 0) {
         return {
-          price: parseFloat(d.lastPrice),
-          bid: parseFloat(d.bidPrice) || parseFloat(d.lastPrice) * 0.9999,
-          ask: parseFloat(d.askPrice) || parseFloat(d.lastPrice) * 1.0001,
-          change24h: parseFloat(d.priceChangePercent),
-          high24h: parseFloat(d.highPrice),
-          low24h: parseFloat(d.lowPrice),
-          volume24h: parseFloat(d.volume),
-          source: 'binance',
+          bids: d.bids.slice(0, 15).map((b: [string, string]) => ({
+            price: parseFloat(b[0]),
+            size: parseFloat(b[1]),
+          })),
+          asks: d.asks.slice(0, 15).map((a: [string, string]) => ({
+            price: parseFloat(a[0]),
+            size: parseFloat(a[1]),
+          })),
+          source: 'binance-l2',
+          status: 'LIVE',
           fetchedAt: Date.now(),
         };
       }
     }
   } catch {}
 
-  // 4. Default Seed Fallback if completely offline
-  const seedPrices: Record<string, number> = { BTCUSDT: 64713, ETHUSDT: 1913.86, SOLUSDT: 77.11, XRPUSDT: 1.001 };
-  const fallbackPrice = seedPrices[symbol] || 64713;
+  // 2. Try Coinbase L2 Depth
+  const cbPair = COINBASE_PAIR_MAP[symbol] || 'BTC-USD';
+  try {
+    const res = await fetch(`https://api.exchange.coinbase.com/products/${cbPair}/book?level=2`, {
+      cache: 'no-store',
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(2500),
+    });
+    if (res.ok) {
+      const d = await res.json();
+      if (Array.isArray(d.bids) && Array.isArray(d.asks) && d.bids.length > 0) {
+        return {
+          bids: d.bids.slice(0, 15).map((b: [string, string, number]) => ({
+            price: parseFloat(b[0]),
+            size: parseFloat(b[1]),
+          })),
+          asks: d.asks.slice(0, 15).map((a: [string, string, number]) => ({
+            price: parseFloat(a[0]),
+            size: parseFloat(a[1]),
+          })),
+          source: 'coinbase-l2',
+          status: 'LIVE',
+          fetchedAt: Date.now(),
+        };
+      }
+    }
+  } catch {}
+
   return {
-    price: fallbackPrice,
-    bid: fallbackPrice * 0.9999,
-    ask: fallbackPrice * 1.0001,
-    change24h: 1.25,
-    high24h: fallbackPrice * 1.015,
-    low24h: fallbackPrice * 0.985,
-    volume24h: 2400000000,
-    source: 'fallback',
+    bids: [],
+    asks: [],
+    source: 'unverified',
+    status: 'UNAVAILABLE',
     fetchedAt: Date.now(),
   };
 }
 
-// ── Multi-Source Order Book Fetcher ──────────────────────────────────────────
-async function getLiveOrderBook(symbol: string, currentPrice?: number) {
-  const basePrice = currentPrice || (symbol === 'BTCUSDT' ? 64713 : symbol === 'ETHUSDT' ? 1913.86 : symbol === 'SOLUSDT' ? 77.11 : 1.001);
-  const spreadStep = basePrice * 0.00015;
+// ── 3. Real Candles Fetcher (Zero Math.sin / Synthetic Candles) ──────────────
+async function getLiveCandles(symbol: string) {
+  // 1. Try Binance 1m Kline Bars
+  try {
+    const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1m&limit=60`, {
+      cache: 'no-store',
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(2500),
+    });
+    if (res.ok) {
+      const d = await res.json();
+      if (Array.isArray(d) && d.length > 0) {
+        return {
+          candles: d.map((k: any) => ({
+            timestamp: k[0],
+            open: parseFloat(k[1]),
+            high: parseFloat(k[2]),
+            low: parseFloat(k[3]),
+            close: parseFloat(k[4]),
+            volume: parseFloat(k[5]),
+          })),
+          source: 'binance',
+          status: 'LIVE',
+          fetchedAt: Date.now(),
+        };
+      }
+    }
+  } catch {}
 
-  const bids = Array.from({ length: 12 }, (_, i) => ({
-    price: parseFloat((basePrice - (i + 1) * spreadStep).toFixed(basePrice > 10 ? 2 : 4)),
-    size: parseFloat((Math.random() * 1.8 + 0.3).toFixed(3)),
-  }));
-  const asks = Array.from({ length: 12 }, (_, i) => ({
-    price: parseFloat((basePrice + (i + 1) * spreadStep).toFixed(basePrice > 10 ? 2 : 4)),
-    size: parseFloat((Math.random() * 1.8 + 0.3).toFixed(3)),
-  }));
-
-  return {
-    bids,
-    asks,
-    source: 'live-l2-depth',
-    fetchedAt: Date.now(),
-  };
-}
-
-// ── Multi-Source Candles Fetcher ─────────────────────────────────────────────
-async function getLiveCandles(symbol: string, currentPrice?: number) {
-  // 1. Try Alpaca Crypto 1-Minute Bars
+  // 2. Try Alpaca Crypto 1-Minute Bars
   const alpacaPair = ALPACA_CRYPTO_MAP[symbol] || 'BTC/USD';
   try {
     const res = await fetch(
@@ -167,7 +239,7 @@ async function getLiveCandles(symbol: string, currentPrice?: number) {
       {
         cache: 'no-store',
         headers: { 'User-Agent': 'Mozilla/5.0' },
-        signal: AbortSignal.timeout(3500),
+        signal: AbortSignal.timeout(3000),
       }
     );
     if (res.ok) {
@@ -181,65 +253,20 @@ async function getLiveCandles(symbol: string, currentPrice?: number) {
             high: parseFloat(b.h),
             low: parseFloat(b.l),
             close: parseFloat(b.c),
-            volume: parseFloat(b.v) || Math.round(Math.random() * 20 + 5),
+            volume: parseFloat(b.v),
           })),
           source: 'alpaca',
+          status: 'LIVE',
           fetchedAt: Date.now(),
         };
       }
     }
   } catch {}
-
-  // 2. Try CoinGecko OHLC
-  const cgId = COINGECKO_MAP[symbol] || 'bitcoin';
-  try {
-    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${cgId}/ohlc?vs_currency=usd&days=1`, {
-      cache: 'no-store',
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-      signal: AbortSignal.timeout(4000),
-    });
-    if (res.ok) {
-      const d = await res.json();
-      if (Array.isArray(d) && d.length > 0) {
-        return {
-          candles: d.map(([time, open, high, low, close]: [number, number, number, number, number]) => ({
-            timestamp: time,
-            open,
-            high,
-            low,
-            close,
-            volume: Math.round(Math.random() * 50 + 10),
-          })),
-          source: 'coingecko',
-          fetchedAt: Date.now(),
-        };
-      }
-    }
-  } catch {}
-
-  // 3. Fallback Synthesized Realistic Series from Live Price
-  const base = currentPrice || 64713;
-  const now = Date.now();
-  const candles = Array.from({ length: 45 }, (_, i) => {
-    const t = now - (45 - i) * 60000;
-    const delta = (Math.sin(i / 4) + (Math.random() - 0.48)) * (base * 0.0015);
-    const o = base + delta;
-    const h = o + Math.random() * (base * 0.001);
-    const l = o - Math.random() * (base * 0.001);
-    const c = (o + h + l) / 3;
-    return {
-      timestamp: t,
-      open: parseFloat(o.toFixed(base > 10 ? 2 : 4)),
-      high: parseFloat(h.toFixed(base > 10 ? 2 : 4)),
-      low: parseFloat(l.toFixed(base > 10 ? 2 : 4)),
-      close: parseFloat(c.toFixed(base > 10 ? 2 : 4)),
-      volume: Math.round(Math.random() * 25 + 5),
-    };
-  });
 
   return {
-    candles,
-    source: 'synthesizer',
+    candles: [],
+    source: 'unverified',
+    status: 'UNAVAILABLE',
     fetchedAt: Date.now(),
   };
 }
@@ -252,7 +279,7 @@ export async function GET(req: NextRequest) {
   const cacheKey = `${symbol}_${type}`;
 
   const cached = marketCache[cacheKey];
-  if (cached && Date.now() - cached.timestamp < 2500) {
+  if (cached && Date.now() - cached.timestamp < 2000) {
     return NextResponse.json(cached.data, {
       headers: {
         'Access-Control-Allow-Origin': '*',
@@ -266,20 +293,22 @@ export async function GET(req: NextRequest) {
     let payload: any;
 
     if (type === 'ticker') {
-      payload = { success: true, ticker };
+      payload = { success: ticker.status === 'LIVE', ticker };
     } else if (type === 'orderbook') {
-      const orderBook = await getLiveOrderBook(symbol, ticker.price);
-      payload = { success: true, orderBook };
+      const orderBook = await getLiveOrderBook(symbol);
+      payload = { success: orderBook.status === 'LIVE', orderBook };
     } else if (type === 'candles') {
-      const candles = await getLiveCandles(symbol, ticker.price);
-      payload = { success: true, candles };
+      const candles = await getLiveCandles(symbol);
+      payload = { success: candles.status === 'LIVE', candles };
     } else {
       const [orderBook, candles] = await Promise.all([
-        getLiveOrderBook(symbol, ticker.price),
-        getLiveCandles(symbol, ticker.price),
+        getLiveOrderBook(symbol),
+        getLiveCandles(symbol),
       ]);
+      const isLive = ticker.status === 'LIVE' && orderBook.status === 'LIVE';
       payload = {
-        success: true,
+        success: isLive,
+        status: isLive ? 'LIVE' : 'UNAVAILABLE',
         ticker,
         orderBook,
         candles,
@@ -287,7 +316,9 @@ export async function GET(req: NextRequest) {
       };
     }
 
-    marketCache[cacheKey] = { data: payload, timestamp: Date.now() };
+    if (payload.success) {
+      marketCache[cacheKey] = { data: payload, timestamp: Date.now() };
+    }
 
     return NextResponse.json(payload, {
       headers: {
@@ -296,35 +327,15 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (err: unknown) {
-    const seedPrices: Record<string, number> = { BTCUSDT: 64713, ETHUSDT: 1913.86, SOLUSDT: 77.11, XRPUSDT: 1.001 };
-    const price = seedPrices[symbol] || 64713;
-    const fallbackTicker = {
-      price,
-      bid: price * 0.9999,
-      ask: price * 1.0001,
-      change24h: 1.25,
-      high24h: price * 1.015,
-      low24h: price * 0.985,
-      volume24h: 2400000000,
-      source: 'fallback',
-      fetchedAt: Date.now(),
-    };
-    const orderBook = await getLiveOrderBook(symbol, price);
-    const candles = await getLiveCandles(symbol, price);
+    const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
       {
-        success: true,
-        ticker: fallbackTicker,
-        orderBook,
-        candles,
+        success: false,
+        status: 'UNAVAILABLE',
+        error: `Live market data feed unavailable: ${message}`,
         timestamp: Date.now(),
       },
-      {
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Cache-Control': 'no-store, max-age=0',
-        },
-      }
+      { status: 503 }
     );
   }
 }
