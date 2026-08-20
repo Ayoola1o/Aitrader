@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   MarketSnapshot,
   SymbolId,
@@ -171,6 +171,53 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       color: 'text-cyan-300',
     },
   ]);
+
+  // Cloud Bots State & Multi-Bot Switching
+  const [cloudBots, setCloudBots] = useState<any[]>([]);
+  const [selectedBotId, setSelectedBotId] = useState<string>('strat-1');
+  const [showBotManagerModal, setShowBotManagerModal] = useState(false);
+
+  const fetchCloudBots = async () => {
+    try {
+      const res = await fetch('/api/bot/state', { cache: 'no-store' });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.success && Array.isArray(d.bots) && d.bots.length > 0) {
+          setCloudBots(d.bots);
+        }
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    fetchCloudBots();
+    const interval = setInterval(fetchCloudBots, 8000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const activeBot = useMemo(() => {
+    return (
+      cloudBots.find((b) => b.id === selectedBotId) ||
+      cloudBots[0] || {
+        id: 'strat-1',
+        name: 'AI Quant Core v1.3',
+        symbol: activeSymbol,
+        version: 'v1.3',
+        status: 'RUNNING',
+        allocatedCapital: portfolio?.equity || 5000,
+        runningPnL: portfolio?.dailyPnL || 0,
+        dailyPnL: portfolio?.dailyPnL || 0,
+      }
+    );
+  }, [cloudBots, selectedBotId, activeSymbol, portfolio]);
+
+  const handleSelectBot = (botId: string) => {
+    setSelectedBotId(botId);
+    const target = cloudBots.find((b) => b.id === botId);
+    if (target && target.symbol && target.symbol !== activeSymbol) {
+      onSelectSymbol(target.symbol as SymbolId);
+    }
+  };
 
   // Live Senpi Smart Money & Whale Flow State
   const [smartMoneyData, setSmartMoneyData] = useState<any | null>(null);
@@ -378,27 +425,58 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
             PANEL 1 (LEFT ~24%): ACTIVE BOT + MARKET WATCH + 8 SPECIALISTS
             ═════════════════════════════════════════════════════════════════════ */}
         <div className={`xl:col-span-3 space-y-3 ${mobileTab === 'BOT_MARKET' ? 'block' : 'hidden xl:block'}`}>
-          {/* Active Bot Card */}
+          {/* Active Bot Card (Dynamic Multi-Bot Switcher + Live Data) */}
           <div className="bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] space-y-3 shadow-md">
-            <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">
-              Active Bot
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">
+                Active Bot Switcher
+              </span>
+              <span className="text-[10px] font-mono font-bold text-cyan-400">
+                {cloudBots.length || 1} Deployed
+              </span>
             </div>
 
-            <div className="flex items-center gap-3">
+            {/* Interactive Bot Dropdown Switcher */}
+            <div className="relative">
+              <select
+                value={activeBot.id}
+                onChange={(e) => handleSelectBot(e.target.value)}
+                className="w-full bg-[#080E1A] border border-gray-800 hover:border-cyan-500/50 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-cyan-500 cursor-pointer appearance-none"
+              >
+                {cloudBots.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    🤖 {b.name} ({b.symbol}) · {b.status}
+                  </option>
+                ))}
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-gray-400">
+                <ChevronDown className="w-3.5 h-3.5" />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 pt-1">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-cyan-500/20">
                 <Bot className="w-5 h-5 text-white" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-black text-white truncate">
-                    QUANTARION V1.3
+                    {activeBot.name}
                   </span>
-                  <span className="text-[9px] px-1.5 py-0.5 rounded-full font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                    ACTIVE
+                  <span
+                    className={`text-[9px] px-1.5 py-0.5 rounded-full font-black ${
+                      activeBot.status === 'RUNNING'
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                        : activeBot.status === 'PAUSED'
+                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                        : 'bg-gray-500/20 text-gray-400 border border-gray-500/30'
+                    }`}
+                  >
+                    {activeBot.status === 'RUNNING' ? 'ACTIVE' : activeBot.status}
                   </span>
                 </div>
-                <div className="text-[11px] text-gray-400">
-                  AI Quant Core Strategy
+                <div className="text-[11px] text-gray-400 truncate">
+                  {activeBot.symbol} · {activeBot.version || 'v1.3'} Strategy Core
                 </div>
               </div>
             </div>
@@ -416,13 +494,18 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
               <div className="flex justify-between">
                 <span className="text-gray-400">Capital Allocation</span>
                 <span className="font-mono font-bold text-white">
-                  $100,000.00
+                  ${(activeBot.allocatedCapital || 5000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-400">Today P&L</span>
-                <span className="font-mono font-bold text-emerald-400">
-                  +$1,245.31 (+1.01%)
+                <span
+                  className={`font-mono font-bold ${
+                    (activeBot.runningPnL || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                  }`}
+                >
+                  {(activeBot.runningPnL || 0) >= 0 ? '+' : ''}$
+                  {Math.abs(activeBot.runningPnL || 0).toFixed(2)}
                 </span>
               </div>
             </div>
@@ -430,10 +513,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
             {/* Actions: Bot Manager & Spawn Bot */}
             <div className="grid grid-cols-2 gap-2 pt-1">
               <button
-                onClick={() => {
-                  setSpawnSymbol(activeSymbol);
-                  setShowSpawnModal(true);
-                }}
+                onClick={() => setShowBotManagerModal(true)}
                 className="py-2 px-3 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors border border-gray-700"
               >
                 <Settings className="w-3.5 h-3.5" /> Bot Manager
@@ -632,18 +712,12 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                         <th className="pb-2 font-bold font-sans">Symbol</th>
                         <th className="pb-2 font-bold font-sans">Side</th>
                         <th className="pb-2 font-bold font-sans">Size</th>
-                        <th className="pb-2 font-bold font-sans">
-                          Entry Price
-                        </th>
+                        <th className="pb-2 font-bold font-sans">Entry Price</th>
                         <th className="pb-2 font-bold font-sans">Mark Price</th>
-                        <th className="pb-2 font-bold font-sans">
-                          Unrealized P&L
-                        </th>
+                        <th className="pb-2 font-bold font-sans">Unrealized P&L</th>
                         <th className="pb-2 font-bold font-sans">P&L %</th>
                         <th className="pb-2 font-bold font-sans">R Multiple</th>
-                        <th className="pb-2 font-bold font-sans text-right">
-                          Actions
-                        </th>
+                        <th className="pb-2 font-bold font-sans text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800/40">
@@ -694,7 +768,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                       ) : (
                         <tr>
                           <td colSpan={9} className="py-6 text-center text-gray-500 font-sans text-xs">
-                            No open positions. Use manual ticket or spawn a bot to enter.
+                            No open positions for {activeSymbol}. Enter a trade or activate an automated bot.
                           </td>
                         </tr>
                       )}
@@ -702,7 +776,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                   </table>
                 </div>
 
-                {/* Financial Overview Metrics Bar (100% Dynamic from live broker) */}
+                {/* Financial Overview Metrics Bar */}
                 {(() => {
                   const totalUnrealized = positions.reduce((acc, p) => acc + (p.unrealizedPnL || 0), 0);
                   const totalRealized = tradeHistory.reduce((acc, t) => acc + (t.realizedPnL || 0), 0);
@@ -744,101 +818,260 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
               </div>
             )}
 
-            {/* Split Sub-Grid: Active Orders + Order Book + Time & Sales */}
-            <div className="grid grid-cols-1 md:grid-cols-3 border-t border-gray-800/80 divide-y md:divide-y-0 md:divide-x divide-gray-800/80 p-3 gap-3">
-              {/* Left: Orders */}
-              <div>
-                <div className="text-[10px] uppercase font-bold text-gray-400 mb-2">
-                  Active Orders
-                </div>
-                <div className="space-y-1.5 text-xs font-mono">
-                  <div className="flex justify-between items-center bg-gray-900/60 p-1.5 rounded">
-                    <div>
-                      <span className="text-emerald-400 font-bold">BUY</span>{' '}
-                      <span className="text-gray-300">0.03 MKT</span>
-                    </div>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">
-                      FILLED
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center bg-gray-900/60 p-1.5 rounded">
-                    <div>
-                      <span className="text-rose-400 font-bold">SELL</span>{' '}
-                      <span className="text-gray-300">0.03 @ 63,800</span>
-                    </div>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400 font-bold">
-                      ACTIVE (SL)
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center bg-gray-900/60 p-1.5 rounded">
-                    <div>
-                      <span className="text-rose-400 font-bold">SELL</span>{' '}
-                      <span className="text-gray-300">0.03 @ 65,600</span>
-                    </div>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400 font-bold">
-                      ACTIVE (TP)
-                    </span>
-                  </div>
+            {/* Workspace Content: ORDERS */}
+            {activeWorkspaceTab === 'ORDERS' && (
+              <div className="p-3 space-y-3">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead>
+                      <tr className="text-[10px] uppercase text-gray-400 border-b border-gray-800">
+                        <th className="pb-2 font-bold font-sans">Order ID</th>
+                        <th className="pb-2 font-bold font-sans">Time</th>
+                        <th className="pb-2 font-bold font-sans">Symbol</th>
+                        <th className="pb-2 font-bold font-sans">Side</th>
+                        <th className="pb-2 font-bold font-sans">Type</th>
+                        <th className="pb-2 font-bold font-sans">Size</th>
+                        <th className="pb-2 font-bold font-sans">Limit / Stop Price</th>
+                        <th className="pb-2 font-bold font-sans">Status</th>
+                        <th className="pb-2 font-bold font-sans text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/40">
+                      {orders.length > 0 ? (
+                        orders.map((ord) => (
+                          <tr key={ord.id} className="hover:bg-gray-800/20">
+                            <td className="py-2.5 text-gray-400 text-[11px]">{ord.id.slice(0, 8)}...</td>
+                            <td className="py-2.5 text-gray-400 text-[11px]">
+                              {new Date((ord as any).createdAt || (ord as any).timestamp || (ord as any).time || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                            </td>
+                            <td className="py-2.5 font-bold text-white">{ord.symbol}</td>
+                            <td className={`py-2.5 font-bold ${ord.side === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {ord.side}
+                            </td>
+                            <td className="py-2.5 text-gray-300 font-sans">{ord.type}</td>
+                            <td className="py-2.5 text-gray-300">{ord.size}</td>
+                            <td className="py-2.5 text-white font-bold">
+                              ${(ord.price || ord.stopPrice || snapshot?.price || 0).toLocaleString()}
+                            </td>
+                            <td className="py-2.5">
+                              <span
+                                className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                                  ord.status === 'FILLED'
+                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                    : ord.status === 'CANCELLED'
+                                    ? 'bg-gray-800 text-gray-400'
+                                    : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                                }`}
+                              >
+                                {ord.status}
+                              </span>
+                            </td>
+                            <td className="py-2.5 text-right">
+                              {ord.status === 'PENDING' && onCancelOrder ? (
+                                <button
+                                  onClick={() => onCancelOrder(ord.id)}
+                                  className="px-2 py-1 bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 rounded text-[10px] font-bold"
+                                >
+                                  Cancel
+                                </button>
+                              ) : (
+                                <span className="text-gray-500 text-[11px]">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={9} className="py-6 text-center text-gray-500 font-sans text-xs">
+                            No active working or pending limit orders.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
+            )}
 
-              {/* Middle: Order Book */}
-              <div>
-                <div className="flex justify-between items-center text-[10px] uppercase font-bold text-gray-400 mb-2">
-                  <span>ORDER BOOK</span>
-                  <span className="text-cyan-400 font-mono">0.01% Spread</span>
-                </div>
-                <div className="space-y-0.5 text-[11px] font-mono">
-                  {orderBookAsks.slice(0, 3).map((a, i) => (
-                    <div
-                      key={i}
-                      className="flex justify-between text-rose-400"
-                    >
-                      <span>{a.price.toFixed(2)}</span>
-                      <span className="text-gray-400">{a.size.toFixed(3)}</span>
+            {/* Workspace Content: ORDER BOOK */}
+            {activeWorkspaceTab === 'ORDER BOOK' && (
+              <div className="p-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Bids */}
+                  <div className="bg-[#080E1A] p-3 rounded-xl border border-gray-800/80 space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px] uppercase font-bold text-emerald-400 pb-1 border-b border-gray-800">
+                      <span>Bids (Buy Orders)</span>
+                      <span>Total Depth</span>
                     </div>
-                  ))}
-                  <div className="py-1 text-center font-bold text-white text-xs bg-gray-900/80 rounded my-1 border border-gray-800">
-                    64,250.18
+                    {orderBookBids.map((b, i) => (
+                      <div key={i} className="flex justify-between items-center text-xs font-mono py-0.5">
+                        <span className="text-emerald-400 font-bold">${b.price.toFixed(2)}</span>
+                        <span className="text-gray-300">{b.size.toFixed(3)}</span>
+                        <span className="text-gray-500">{b.sum.toFixed(3)}</span>
+                      </div>
+                    ))}
                   </div>
-                  {orderBookBids.slice(0, 3).map((b, i) => (
-                    <div
-                      key={i}
-                      className="flex justify-between text-emerald-400"
-                    >
-                      <span>{b.price.toFixed(2)}</span>
-                      <span className="text-gray-400">{b.size.toFixed(3)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
 
-              {/* Right: Time & Sales */}
-              <div>
-                <div className="text-[10px] uppercase font-bold text-gray-400 mb-2">
-                  TIME & SALES
-                </div>
-                <div className="space-y-1 text-[11px] font-mono">
-                  {timeAndSales.slice(0, 5).map((ts, i) => (
-                    <div key={i} className="flex justify-between items-center">
-                      <span className="text-gray-500">{ts.time}</span>
-                      <span className="text-white font-semibold">
-                        {ts.price.toFixed(2)}
-                      </span>
-                      <span
-                        className={`font-bold ${
-                          ts.side === 'BUY'
-                            ? 'text-emerald-400'
-                            : 'text-rose-400'
-                        }`}
-                      >
-                        {ts.size} {ts.side}
-                      </span>
+                  {/* Asks */}
+                  <div className="bg-[#080E1A] p-3 rounded-xl border border-gray-800/80 space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px] uppercase font-bold text-rose-400 pb-1 border-b border-gray-800">
+                      <span>Asks (Sell Orders)</span>
+                      <span>Total Depth</span>
                     </div>
-                  ))}
+                    {orderBookAsks.map((a, i) => (
+                      <div key={i} className="flex justify-between items-center text-xs font-mono py-0.5">
+                        <span className="text-rose-400 font-bold">${a.price.toFixed(2)}</span>
+                        <span className="text-gray-300">{a.size.toFixed(3)}</span>
+                        <span className="text-gray-500">{a.sum.toFixed(3)}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
+
+            {/* Workspace Content: TIME & SALES */}
+            {activeWorkspaceTab === 'TIME & SALES' && (
+              <div className="p-3">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead>
+                      <tr className="text-[10px] uppercase text-gray-400 border-b border-gray-800">
+                        <th className="pb-2 font-bold font-sans">Timestamp</th>
+                        <th className="pb-2 font-bold font-sans">Price ($)</th>
+                        <th className="pb-2 font-bold font-sans">Size</th>
+                        <th className="pb-2 font-bold font-sans">Aggressor Side</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/40">
+                      {timeAndSales.map((ts, i) => (
+                        <tr key={i} className="hover:bg-gray-800/20">
+                          <td className="py-2 text-gray-400 text-[11px]">{ts.time}</td>
+                          <td className="py-2 text-white font-bold">${ts.price.toFixed(2)}</td>
+                          <td className="py-2 text-gray-300">{ts.size}</td>
+                          <td className="py-2">
+                            <span
+                              className={`text-[9px] px-2 py-0.5 rounded font-bold ${
+                                ts.side === 'BUY'
+                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                  : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                              }`}
+                            >
+                              {ts.side}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Workspace Content: EXECUTIONS (Trade History) */}
+            {activeWorkspaceTab === 'EXECUTIONS' && (
+              <div className="p-3 space-y-3">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead>
+                      <tr className="text-[10px] uppercase text-gray-400 border-b border-gray-800">
+                        <th className="pb-2 font-bold font-sans">Closed At</th>
+                        <th className="pb-2 font-bold font-sans">Symbol</th>
+                        <th className="pb-2 font-bold font-sans">Side</th>
+                        <th className="pb-2 font-bold font-sans">Size</th>
+                        <th className="pb-2 font-bold font-sans">Entry</th>
+                        <th className="pb-2 font-bold font-sans">Exit</th>
+                        <th className="pb-2 font-bold font-sans">Realized P&L</th>
+                        <th className="pb-2 font-bold font-sans">Return %</th>
+                        <th className="pb-2 font-bold font-sans text-right">Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/40">
+                      {tradeHistory.length > 0 ? (
+                        tradeHistory.map((th) => {
+                          const isWin = th.realizedPnL >= 0;
+                          return (
+                            <tr key={th.id} className="hover:bg-gray-800/20">
+                              <td className="py-2.5 text-gray-400 text-[11px]">
+                                {new Date(th.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                              </td>
+                              <td className="py-2.5 font-bold text-white">{th.symbol}</td>
+                              <td className={`py-2.5 font-bold ${th.side === 'LONG' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                {th.side}
+                              </td>
+                              <td className="py-2.5 text-gray-300">{th.size}</td>
+                              <td className="py-2.5 text-gray-300">${th.entryPrice.toLocaleString()}</td>
+                              <td className="py-2.5 text-white font-bold">${th.exitPrice.toLocaleString()}</td>
+                              <td className={`py-2.5 font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                {isWin ? '+' : ''}${th.realizedPnL.toFixed(2)}
+                              </td>
+                              <td className={`py-2.5 font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                {isWin ? '+' : ''}{th.realizedPnLPercent.toFixed(2)}%
+                              </td>
+                              <td className="py-2.5 text-right">
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-300 font-sans font-semibold">
+                                  {th.closeReason || 'TP / SL'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={9} className="py-6 text-center text-gray-500 font-sans text-xs">
+                            No closed trade executions recorded in this session.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Workspace Content: TERMINAL LOGS */}
+            {activeWorkspaceTab === 'TERMINAL LOGS' && (
+              <div className="p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] uppercase font-bold text-gray-400">Filter Engine Logs:</span>
+                    <select
+                      value={logFilter}
+                      onChange={(e) => setLogFilter(e.target.value)}
+                      className="bg-[#080E1A] border border-gray-800 text-[11px] rounded-lg px-2 py-1 text-cyan-300 font-mono focus:outline-none"
+                    >
+                      <option value="ALL">ALL LOGS</option>
+                      <option value="MARKET">MARKET DATA</option>
+                      <option value="AGENT">AGENT SIGNALS</option>
+                      <option value="FUSION">FUSION & LLM</option>
+                      <option value="RISK">RISK GATE</option>
+                      <option value="BROKER">BROKER / ORDER</option>
+                    </select>
+                  </div>
+                  <button
+                    onClick={() => setLogs([])}
+                    className="text-[10px] px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold"
+                  >
+                    Clear Stream
+                  </button>
+                </div>
+
+                <div
+                  ref={logContainerRef}
+                  className="h-64 bg-[#080E1A] rounded-xl p-3 font-mono text-[11px] overflow-y-auto space-y-1.5 border border-gray-800 custom-scrollbar"
+                >
+                  {logs
+                    .filter((l) => (logFilter === 'ALL' ? true : l.tag.includes(logFilter)))
+                    .map((l) => (
+                      <div key={l.id} className="leading-relaxed flex items-start gap-2">
+                        <span className="text-gray-600 shrink-0">{l.time}</span>
+                        <span className={`font-bold shrink-0 ${l.color}`}>{l.tag}</span>
+                        <span className="text-gray-300">{l.message}</span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1283,6 +1516,18 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── BOT MANAGER MODAL ── */}
+      {showBotManagerModal && (
+        <BotManager
+          activeBotId={activeBot.id}
+          onSelectBot={(b) => {
+            handleSelectBot(b.id);
+            setShowBotManagerModal(false);
+          }}
+          onClose={() => setShowBotManagerModal(false)}
+        />
       )}
     </div>
   );

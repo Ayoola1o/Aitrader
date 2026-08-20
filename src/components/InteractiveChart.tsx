@@ -123,7 +123,18 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
 
       const c = visibleCandles[i];
       if (c) {
-        const timeStr = new Date(c.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const rawTime = c.time || (c as any).timestamp || (Date.now() - (count - i) * 60000);
+        const timeMs =
+          typeof rawTime === 'number' && rawTime < 1e11
+            ? rawTime * 1000
+            : !isNaN(new Date(rawTime).getTime())
+            ? new Date(rawTime).getTime()
+            : Date.now() - (count - i) * 60000;
+        const d = new Date(timeMs);
+        const timeStr = !isNaN(d.getTime())
+          ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : `${i}m`;
+
         ctx.fillStyle = '#64748B';
         ctx.font = '9px monospace';
         ctx.textAlign = 'center';
