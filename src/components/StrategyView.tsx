@@ -77,6 +77,36 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
   const [activeLogBot, setActiveLogBot] = useState<BotStrategyItem | null>(null);
   const [editingBot, setEditingBot] = useState<BotStrategyItem | null>(null);
 
+  // Import Strategy Modal State
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importCode, setImportCode] = useState(`name: "Hawk Breakout Strikers"
+symbol: "BTCUSDT"
+version: "v1.0"
+allocatedCapital: 2500
+cycleIntervalSeconds: 30
+riskLimits:
+  maxPositionSize: 2.5
+  dailyDrawdownLimit: 4.5
+agentWeights:
+  technical: 95
+  liquidity: 85
+  sentiment: 70
+  macro: 50
+  execution: 80`);
+  const [importError, setImportError] = useState('');
+
+  // Global Strategy Settings State
+  const [showGlobalSettingsModal, setShowGlobalSettingsModal] = useState(false);
+  const [globalStrategySettings, setGlobalStrategySettings] = useState({
+    maxAggregateLeverage: 5,
+    maxDailyDrawdown: 5.0,
+    emergencyHaltAll: false,
+    autoRestartOnReconnect: true,
+    slippageToleranceBps: 15,
+    newsKillSwitch: true,
+    telegramStrategyAlerts: true,
+  });
+
   // Prebuilt Custom Institutional Strategy Templates
   const PREBUILT_STRATEGY_TEMPLATES = [
     {
@@ -593,6 +623,111 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
     } catch {}
   };
 
+  const handleImportStrategy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setImportError('');
+    try {
+      let parsedName = 'Imported Institutional Strategy';
+      let parsedSymbol: SymbolId = 'BTCUSDT';
+      let parsedCap = 2500;
+      let parsedInterval = 30;
+
+      // Try JSON parsing
+      if (importCode.trim().startsWith('{')) {
+        const obj = JSON.parse(importCode);
+        if (obj.name) parsedName = obj.name;
+        if (obj.symbol) parsedSymbol = obj.symbol;
+        if (obj.allocatedCapital) parsedCap = Number(obj.allocatedCapital);
+        if (obj.cycleIntervalSeconds) parsedInterval = Number(obj.cycleIntervalSeconds);
+      } else {
+        // Line-based key-value parsing for YAML
+        const lines = importCode.split('\n');
+        for (const line of lines) {
+          const match = line.match(/^([a-zA-Z0-9_]+)\s*:\s*(.+)$/);
+          if (match) {
+            const key = match[1].trim();
+            const val = match[2].trim().replace(/^["']|["']$/g, '');
+            if (key === 'name') parsedName = val;
+            if (key === 'symbol') parsedSymbol = val as SymbolId;
+            if (key === 'allocatedCapital') parsedCap = Number(val) || 2500;
+            if (key === 'cycleIntervalSeconds') parsedInterval = Number(val) || 30;
+          }
+        }
+      }
+
+      const importedBot: BotStrategyItem = {
+        id: `strat-${Date.now()}`,
+        name: parsedName,
+        version: 'v1.0-custom',
+        symbol: parsedSymbol,
+        iconType: 'bot',
+        status: 'ACTIVE',
+        allocation: `$ ${parsedCap.toLocaleString()}`,
+        allocatedCapitalVal: parsedCap,
+        currentPosition: 'FLAT',
+        dailyPnL: '$0.00',
+        dailyPnLVal: 0,
+        totalReturn: '0.00%',
+        winRateRR: '—',
+        sparkline: [100, 100],
+        sparkColor: '#10B981',
+        fusionScore: liveFusionScore,
+        uptime: '1m',
+        cycleIntervalSeconds: parsedInterval,
+        cyclesCompleted: 0,
+        tradesExecuted: 0,
+        agentWeights: { technical: 95, sentiment: 70, liquidity: 85, macro: 50, execution: 80 },
+        riskLimits: { maxPositionSize: 2.5, dailyDrawdownLimit: 4.5 },
+        logs: [
+          {
+            id: 1,
+            time: Date.now(),
+            level: 'INFO',
+            message: `Strategy "${parsedName}" imported & deployed for ${parsedSymbol} · 24/7 Cloud Active`,
+          },
+        ],
+      };
+
+      setStrategies((prev) => [importedBot, ...prev]);
+      setSelectedStrategyId(importedBot.id);
+      setShowImportModal(false);
+      setActiveSection('my_strategies');
+
+      await fetch('/api/bot/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'CREATE',
+          config: {
+            name: importedBot.name,
+            symbol: importedBot.symbol,
+            allocatedCapital: importedBot.allocatedCapitalVal,
+            cycleIntervalSeconds: importedBot.cycleIntervalSeconds,
+          },
+        }),
+      });
+    } catch (err: any) {
+      setImportError(err.message || 'Invalid strategy format. Please check JSON / YAML syntax.');
+    }
+  };
+
+  const handleSaveGlobalSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (globalStrategySettings.emergencyHaltAll) {
+      setStrategies((prev) => prev.map((s) => ({ ...s, status: 'PAUSED' })));
+      for (const s of strategies) {
+        try {
+          await fetch('/api/bot/state', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'PAUSE', botId: s.id }),
+          });
+        } catch {}
+      }
+    }
+    setShowGlobalSettingsModal(false);
+  };
+
   const getStrategyIcon = (type: string) => {
     switch (type) {
       case 'bot':
@@ -617,14 +752,27 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
       {/* Left Strategy Sidebar (Horizontal on mobile, vertical on desktop) */}
       <StrategySidebar
         activeSection={activeSection}
-        onSelectSection={setActiveSection}
+        onSelectSection={(id) => {
+          if (id === 'settings') {
+            setShowGlobalSettingsModal(true);
+          } else {
+            setActiveSection(id);
+          }
+        }}
         statusFilter={statusFilter}
-        onSelectStatusFilter={setStatusFilter}
+        onSelectStatusFilter={(filter) => {
+          setStatusFilter(filter);
+          if (activeSection !== 'overview' && activeSection !== 'my_strategies') {
+            setActiveSection('my_strategies');
+          }
+        }}
         activeCount={activeBotsCount}
         paperCount={paperBotsCount}
         pausedCount={pausedBotsCount}
         archivedCount={0}
-        onOpenSettings={onNavigateSettings}
+        onCreateStrategy={() => setShowCreateModal(true)}
+        onImportStrategy={() => setShowImportModal(true)}
+        onOpenSettings={() => setShowGlobalSettingsModal(true)}
       />
 
       {/* Main Strategy Content Area */}
@@ -1488,6 +1636,278 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
                 className="w-1/2 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold"
               >
                 Save Changes
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ── IMPORT STRATEGY MODAL ── */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <form
+            onSubmit={handleImportStrategy}
+            className="bg-[#0B111E] border border-gray-800 rounded-2xl p-6 max-w-lg w-full text-xs space-y-4 shadow-2xl"
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-gray-800">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
+                  <Download className="w-4 h-4 text-emerald-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white">Import Institutional Strategy</h3>
+                  <p className="text-[10px] text-gray-400">Paste YAML/JSON config or load from Senpi library</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowImportModal(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Quick Templates */}
+            <div>
+              <label className="text-gray-400 block mb-1.5 font-bold">Quick Templates to Load:</label>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  {
+                    label: '🦅 Hawk YAML',
+                    code: `name: "Hawk 7-Day Breakout"
+symbol: "BTCUSDT"
+version: "v1.0"
+allocatedCapital: 3000
+cycleIntervalSeconds: 30
+riskLimits:
+  maxPositionSize: 2.5
+  dailyDrawdownLimit: 4.5
+agentWeights:
+  technical: 95
+  liquidity: 85
+  sentiment: 70`,
+                  },
+                  {
+                    label: '🐫 Camel YAML',
+                    code: `name: "Camel Funding Carry"
+symbol: "ETHUSDT"
+version: "v1.0"
+allocatedCapital: 2500
+cycleIntervalSeconds: 60
+riskLimits:
+  maxPositionSize: 3.0
+  dailyDrawdownLimit: 4.0
+agentWeights:
+  technical: 75
+  liquidity: 95
+  sentiment: 60`,
+                  },
+                  {
+                    label: '🐋 WhaleHunter JSON',
+                    code: `{
+  "name": "WhaleHunter Flow Mirror",
+  "symbol": "SOLUSDT",
+  "version": "v1.0",
+  "allocatedCapital": 4000,
+  "cycleIntervalSeconds": 30
+}`,
+                  },
+                ].map((tpl, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setImportCode(tpl.code)}
+                    className="px-2.5 py-1 rounded-lg bg-[#080E1A] hover:bg-gray-800 border border-gray-800 text-[11px] text-cyan-300 font-medium transition-colors"
+                  >
+                    {tpl.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Code Box */}
+            <div>
+              <label className="text-gray-400 block mb-1 font-bold">Strategy Config (YAML / JSON)</label>
+              <textarea
+                rows={8}
+                value={importCode}
+                onChange={(e) => setImportCode(e.target.value)}
+                className="w-full bg-[#080E1A] border border-gray-800 rounded-xl p-3 font-mono text-[11px] text-emerald-400 focus:outline-none focus:border-cyan-500 custom-scrollbar"
+                placeholder="Paste strategy YAML or JSON here..."
+              />
+            </div>
+
+            {importError && (
+              <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-[11px]">
+                {importError}
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowImportModal(false)}
+                className="w-1/2 py-2.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="w-1/2 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black shadow-lg shadow-emerald-500/20"
+              >
+                Import & Deploy
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ── GLOBAL STRATEGY SETTINGS MODAL ── */}
+      {showGlobalSettingsModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <form
+            onSubmit={handleSaveGlobalSettings}
+            className="bg-[#0B111E] border border-gray-800 rounded-2xl p-6 max-w-md w-full text-xs space-y-4 shadow-2xl"
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-gray-800">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center">
+                  <Settings className="w-4 h-4 text-purple-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white">Global Strategy Engine Settings</h3>
+                  <p className="text-[10px] text-gray-400">Configure global safety gates across all active bots</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowGlobalSettingsModal(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Emergency Halt */}
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-between">
+              <div>
+                <span className="font-bold text-rose-400 block">Emergency Panic Halt</span>
+                <span className="text-[10px] text-gray-400">Instantly pauses all active bots and stops order execution</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={globalStrategySettings.emergencyHaltAll}
+                onChange={(e) =>
+                  setGlobalStrategySettings({
+                    ...globalStrategySettings,
+                    emergencyHaltAll: e.target.checked,
+                  })
+                }
+                className="w-4 h-4 accent-rose-500 rounded cursor-pointer"
+              />
+            </div>
+
+            {/* Max Aggregate Leverage */}
+            <div>
+              <div className="flex justify-between mb-1">
+                <span className="text-gray-400 font-bold">Max Aggregate Leverage</span>
+                <span className="font-mono text-cyan-400 font-bold">{globalStrategySettings.maxAggregateLeverage}x</span>
+              </div>
+              <input
+                type="range"
+                min="1"
+                max="20"
+                value={globalStrategySettings.maxAggregateLeverage}
+                onChange={(e) =>
+                  setGlobalStrategySettings({
+                    ...globalStrategySettings,
+                    maxAggregateLeverage: Number(e.target.value),
+                  })
+                }
+                className="w-full accent-cyan-500 cursor-pointer"
+              />
+            </div>
+
+            {/* Max Daily Portfolio Drawdown */}
+            <div>
+              <label className="text-gray-400 block mb-1 font-bold">Max Daily Portfolio Drawdown (%)</label>
+              <input
+                type="number"
+                step="0.5"
+                value={globalStrategySettings.maxDailyDrawdown}
+                onChange={(e) =>
+                  setGlobalStrategySettings({
+                    ...globalStrategySettings,
+                    maxDailyDrawdown: Number(e.target.value),
+                  })
+                }
+                className="w-full bg-[#080E1A] border border-gray-800 rounded-xl p-2.5 text-white font-mono"
+              />
+            </div>
+
+            {/* Slippage Gate */}
+            <div>
+              <label className="text-gray-400 block mb-1 font-bold">Max Slippage Tolerance (BPS)</label>
+              <input
+                type="number"
+                value={globalStrategySettings.slippageToleranceBps}
+                onChange={(e) =>
+                  setGlobalStrategySettings({
+                    ...globalStrategySettings,
+                    slippageToleranceBps: Number(e.target.value),
+                  })
+                }
+                className="w-full bg-[#080E1A] border border-gray-800 rounded-xl p-2.5 text-white font-mono"
+              />
+            </div>
+
+            {/* Toggles */}
+            <div className="space-y-2 pt-1">
+              <label className="flex items-center justify-between p-2 rounded-lg bg-[#080E1A] border border-gray-800 cursor-pointer">
+                <span className="text-gray-300">Auto-Restart on Reconnect</span>
+                <input
+                  type="checkbox"
+                  checked={globalStrategySettings.autoRestartOnReconnect}
+                  onChange={(e) =>
+                    setGlobalStrategySettings({
+                      ...globalStrategySettings,
+                      autoRestartOnReconnect: e.target.checked,
+                    })
+                  }
+                  className="w-3.5 h-3.5 accent-cyan-500"
+                />
+              </label>
+
+              <label className="flex items-center justify-between p-2 rounded-lg bg-[#080E1A] border border-gray-800 cursor-pointer">
+                <span className="text-gray-300">News Volatility Kill-Switch</span>
+                <input
+                  type="checkbox"
+                  checked={globalStrategySettings.newsKillSwitch}
+                  onChange={(e) =>
+                    setGlobalStrategySettings({
+                      ...globalStrategySettings,
+                      newsKillSwitch: e.target.checked,
+                    })
+                  }
+                  className="w-3.5 h-3.5 accent-cyan-500"
+                />
+              </label>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowGlobalSettingsModal(false)}
+                className="w-1/2 py-2.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="w-1/2 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white font-black shadow-lg shadow-purple-500/20"
+              >
+                Save Settings
               </button>
             </div>
           </form>
