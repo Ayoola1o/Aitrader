@@ -138,7 +138,7 @@ Welcome! Full remote control and monitoring for your 24/7 autonomous trading bot
 5. 📊 <b>Volatility Specialist:</b> <code>NORMAL (ATR 1.82%)</code>
 6. 🌍 <b>Macro / Sentiment:</b> <code>76% GREED (DXY pullback)</code>
 7. 🧭 <b>Regime Specialist:</b> <code>TRENDING_UP (Confidence 82%)</code>
-8. 🎯 <b>Execution Specialist:</b> <code>OPTIMAL (Slippage < 0.02%)</code>
+8. 🎯 <b>Execution Specialist:</b> <code>OPTIMAL (Slippage &lt; 0.02%)</code>
 ━━━━━━━━━━━━━━━━━━━━
 🔥 <b>Fusion Engine Score:</b> <code>+0.78 (STRONG BUY BIAS)</code>
 `.trim();

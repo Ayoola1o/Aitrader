@@ -558,7 +558,7 @@ export default function Home() {
             <DataLabTelemetryView snapshot={snapshot ?? undefined} />
           )}
 
-          {activeTab === 'backtesting' && <BacktestingView />}
+          {activeTab === 'backtesting' && <BacktestingView snapshot={snapshot} />}
 
           {activeTab === 'alerts' && <AlertsView />}
 

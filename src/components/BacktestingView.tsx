@@ -30,8 +30,13 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { BacktestingSidebar, BacktestNavId } from '@/components/backtesting/BacktestingSidebar';
+import { MarketSnapshot } from '@/types/trading';
 
-export const BacktestingView: React.FC = () => {
+interface BacktestingViewProps {
+  snapshot?: MarketSnapshot | null;
+}
+
+export const BacktestingView: React.FC<BacktestingViewProps> = ({ snapshot }) => {
   const [activeSection, setActiveSection] = useState<BacktestNavId>('overview');
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<'TRADES' | 'SUMMARY' | 'RISK' | 'MONTE_CARLO' | 'WALK_FORWARD' | 'PARAMETER'>('TRADES');
   const [timeRange, setTimeRange] = useState<'1D' | '7D' | '1M' | '3M' | '6M' | 'YTD' | '1Y' | 'ALL'>('ALL');
