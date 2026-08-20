@@ -151,6 +151,95 @@ class SupabaseManager {
       return false;
     }
   }
+
+  // ── Multi-Tenant User Persistence ───────────────────────────────────────────
+  async getUserBots(userId: string): Promise<Record<string, unknown>[]> {
+    const client = this.getClient();
+    if (!client || !userId) return [];
+    try {
+      const { data, error } = await client
+        .from('user_bots')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+      if (error || !data) return [];
+      return data;
+    } catch {
+      return [];
+    }
+  }
+
+  async saveUserBot(userId: string, bot: Record<string, unknown>): Promise<boolean> {
+    const client = this.getClient();
+    if (!client || !userId) return false;
+    try {
+      const { error } = await client
+        .from('user_bots')
+        .upsert({ ...bot, user_id: userId, updated_at: new Date().toISOString() }, { onConflict: 'bot_id' });
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  async getUserTrades(userId: string): Promise<Record<string, unknown>[]> {
+    const client = this.getClient();
+    if (!client || !userId) return [];
+    try {
+      const { data, error } = await client
+        .from('user_trades')
+        .select('*')
+        .eq('user_id', userId)
+        .order('timestamp', { ascending: false })
+        .limit(100);
+      if (error || !data) return [];
+      return data;
+    } catch {
+      return [];
+    }
+  }
+
+  async saveUserTrade(userId: string, trade: Record<string, unknown>): Promise<boolean> {
+    const client = this.getClient();
+    if (!client || !userId) return false;
+    try {
+      const { error } = await client
+        .from('user_trades')
+        .insert({ ...trade, user_id: userId, created_at: new Date().toISOString() });
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  async getUserProfile(userId: string): Promise<Record<string, unknown> | null> {
+    const client = this.getClient();
+    if (!client || !userId) return null;
+    try {
+      const { data, error } = await client
+        .from('user_profiles')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (error || !data) return null;
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  async saveUserProfile(userId: string, profile: Record<string, unknown>): Promise<boolean> {
+    const client = this.getClient();
+    if (!client || !userId) return false;
+    try {
+      const { error } = await client
+        .from('user_profiles')
+        .upsert({ ...profile, user_id: userId, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+      return !error;
+    } catch {
+      return false;
+    }
+  }
 }
 
 export const supabaseManager = new SupabaseManager();

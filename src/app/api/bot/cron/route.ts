@@ -299,7 +299,26 @@ async function handleCronCycle(req: NextRequest) {
       }
     }
 
-    // 7. Update Supabase with cycle results
+    // 7. Periodically Broadcast 30-Minute AI Specialist Consensus to Telegram
+    const is30MinMark = cycleCount === 1 || cycleCount % 60 === 0 || Date.now() % 1800000 < 60000;
+    if (is30MinMark) {
+      telegramService.sendAIMarketConsensusBrief({
+        symbol,
+        price: snap.price,
+        regime: feat.adx > 25 ? 'TRENDING_UP' : 'SIDEWAYS',
+        fusionScore: fusion.buyScore || fusion.confidence,
+        dominantAction: dec.action,
+        confidence: dec.confidence,
+        agents: signals.map((s) => ({
+          name: s.agentName,
+          bias: s.bias,
+          conf: s.confidence,
+        })),
+        llmRationale: dec.reasoning[0],
+      }).catch(() => {});
+    }
+
+    // 8. Update Supabase with cycle results
     const updatedLogs = [...cycleLogs, ...existingLogs].slice(0, 60);
 
     const updatedRecord: Partial<BotSessionRecord> & { session_id: string } = {

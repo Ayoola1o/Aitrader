@@ -105,6 +105,23 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             </span>
           )}
         </div>
+
+        {/* User Account / Logout */}
+        <button
+          onClick={() => {
+            if (confirm('Sign out from AI Quant Trader?')) {
+              window.location.reload();
+              if (typeof window !== 'undefined') localStorage.removeItem('aitrader_user_session');
+            }
+          }}
+          title="Click to Sign Out"
+          className="flex items-center gap-2 pl-2 pr-3 py-1 rounded-xl bg-[#0B111E] border border-gray-800 hover:border-rose-500/40 text-xs text-gray-300 hover:text-white transition-all cursor-pointer"
+        >
+          <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 text-[10px] font-bold text-white flex items-center justify-center">
+            AI
+          </div>
+          <span className="hidden md:inline font-semibold text-[11px]">Trader</span>
+        </button>
       </div>
     </header>
   );

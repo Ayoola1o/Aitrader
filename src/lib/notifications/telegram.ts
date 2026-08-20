@@ -228,6 +228,50 @@ ${data.symbol ? `💎 <b>Symbol:</b> <code>${data.symbol}</code>\n` : ''}
 
     return this.sendMessage(text);
   }
+
+  // ── 30-Minute AI Specialist Consensus Brief ─────────────────────────────────
+  async sendAIMarketConsensusBrief(data: {
+    symbol: string;
+    price: number;
+    regime: string;
+    fusionScore: number;
+    dominantAction: string;
+    confidence: number;
+    agents: Array<{ name: string; bias: string; conf: number }>;
+    llmRationale?: string;
+  }) {
+    if (!this.config.enabled && !this.isConfigured()) return;
+
+    const actionEmoji =
+      data.dominantAction === 'BUY'
+        ? '🟢 <b>BULLISH (BUY BIAS)</b>'
+        : data.dominantAction === 'SELL'
+        ? '🔴 <b>BEARISH (SELL BIAS)</b>'
+        : '🔵 <b>NEUTRAL (CONSOLIDATION)</b>';
+
+    let agentsSummary = '';
+    data.agents.slice(0, 5).forEach((a) => {
+      agentsSummary += `• ${a.name}: <code>${a.bias} (${Math.round(a.conf * 100)}%)</code>\n`;
+    });
+
+    const text = `
+🧠 <b>[30-MIN AI MARKET INTELLIGENCE BRIEF]</b>
+━━━━━━━━━━━━━━━━━━━━
+💎 <b>Asset:</b> <code>${data.symbol}</code> @ <code>$${data.price.toLocaleString()}</code>
+🧭 <b>Regime:</b> <code>${data.regime}</code>
+🎯 <b>AI Consensus:</b> ${actionEmoji}
+📊 <b>Confidence:</b> <code>${Math.round(data.confidence * 100)}%</code> (Score: <code>${data.fusionScore.toFixed(2)}</code>)
+
+🤖 <b>Specialist Agent Signals:</b>
+${agentsSummary}
+💡 <b>LLM Synthesis:</b>
+<i>"${data.llmRationale || 'Market balanced within expected ATR bands.'}"</i>
+━━━━━━━━━━━━━━━━━━━━
+⏰ <i>${new Date().toUTCString()}</i>
+`.trim();
+
+    return this.sendMessage(text);
+  }
 }
 
 export const telegramService = new TelegramNotificationService();

@@ -68,6 +68,15 @@ Once connected, you can message your bot directly from Telegram with any of the 
 | **`/closeall`** | 🚨 **Emergency Panic Button**: Instantly liquidates all positions across Alpaca & Paper broker! | `🚨 Closed all positions across Alpaca & Paper Broker. Flat.` |
 | **`/report`** | Full quantitative performance attribution breakdown. | `Sharpe 2.14 · Sortino 3.42 · Profit Factor 2.38` |
 
+/heartbeat / /health: System uptime, memory usage, Render process health, active WebSocket streams.
+/bots: List all deployed cloud bots (ID, Name, Symbol, Status, Capital, Running PnL).
+/bot <create|pause|resume|stop> <botId or symbol>: Direct remote control to pause, resume, stop, or create bots from Telegram chat.
+/exchange: Check live connectivity to Binance, Alpaca, and Hyperliquid with balance telemetry.
+/strategies: Institutional strategy blueprint catalog.
+/backtest <symbol>: Run quick quantitative backtest and return win rate, profit factor, and Sharpe.
+/trades / /history: Last 10 executed trade fills with realized P&L and reason.
+/agents: Status and bias of all 8 specialist agents.
+/help: Complete formatted command cheatsheet.
 ---
 
 ## 📡 Automatic Alerts You Will Receive

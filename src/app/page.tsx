@@ -35,11 +35,14 @@ import { DataLabTelemetryView } from '@/components/DataLabTelemetryView';
 import { PaperTradingView } from '@/components/PaperTradingView';
 import { ReplayResearchView } from '@/components/ReplayResearchView';
 import { SettingsView } from '@/components/SettingsView';
+import { LoginView } from '@/components/auth/LoginView';
+import { sessionManager, UserSession } from '@/lib/auth/session';
 
 const SYMBOLS: SymbolId[] = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
 const POLL_INTERVAL_MS = 8000;
 
 export default function Home() {
+  const [currentUser, setCurrentUser] = useState<UserSession | null>(() => sessionManager.getCurrentUser());
   const [activeTab, setActiveTab] = useState<NavTabId>('dashboard');
   const [activeSymbol, setActiveSymbol] = useState<SymbolId>('BTCUSDT');
   const [appMode, setAppMode] = useState<AppMode>('PAPER');
@@ -401,6 +404,10 @@ export default function Home() {
   const currentEquity = portfolio?.equity ?? (paperBroker.getPortfolioState(snapshot?.price || 64713).equity || 100000);
   const currentPnL = portfolio?.dailyPnL ?? (paperBroker.getPortfolioState(snapshot?.price || 64713).dailyPnL || 0);
   const currentPnLPercent = currentEquity > 0 ? (currentPnL / currentEquity) * 100 : 0;
+
+  if (!currentUser) {
+    return <LoginView onLoginSuccess={(u) => setCurrentUser(u)} />;
+  }
 
   return (
     <div className="min-h-screen bg-[#080E1A] text-white flex flex-row overflow-x-hidden font-sans">
