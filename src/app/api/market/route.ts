@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { checkRateLimit, rateLimitResponse } from '@/lib/server/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -273,6 +274,9 @@ async function getLiveCandles(symbol: string) {
 
 // ── Main Route Handler ───────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
+  const rate = checkRateLimit(req, { limit: 180, windowMs: 60000 });
+  if (!rate.allowed) return rateLimitResponse(rate.retryAfter);
+
   const { searchParams } = new URL(req.url);
   const symbol = searchParams.get('symbol') || 'BTCUSDT';
   const type = searchParams.get('type') || 'all';

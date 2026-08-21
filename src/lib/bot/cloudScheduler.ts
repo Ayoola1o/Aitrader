@@ -106,15 +106,33 @@ export class CloudBotScheduler {
           bot.cycleCount++;
           bot.lastCycleAt = Date.now();
 
+          await supabaseManager.recordBotRun({
+            bot_id: bot.id,
+            cycle_number: bot.cycleCount,
+            pnl: bot.pnl,
+            trades_executed: bot.tradesExecuted,
+            last_action: res.logMessage,
+          });
+
           if (res.halted) {
             bot.status = 'PAUSED';
             errors.push(`Bot ${bot.name} paused: ${res.haltReason}`);
+            await supabaseManager.recordBotEvent({
+              bot_id: bot.id,
+              event_type: 'ERROR',
+              message: `Bot halted: ${res.haltReason}`,
+            });
             return;
           }
 
           processedCount++;
           if (res.tradeExecuted) {
             bot.tradesExecuted++;
+            await supabaseManager.recordBotEvent({
+              bot_id: bot.id,
+              event_type: 'ACTION',
+              message: res.logMessage,
+            });
           }
         } catch (err: any) {
           errors.push(`Bot ${bot.name} error: ${err?.message || String(err)}`);

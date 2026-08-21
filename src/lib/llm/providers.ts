@@ -131,17 +131,28 @@ export class AIProviderManager {
     this.config = config;
     if (typeof window !== 'undefined') {
       localStorage.setItem('aitrader_ai_provider', config.provider);
-      if (config.apiKey) localStorage.setItem('aitrader_ai_api_key', config.apiKey);
+      localStorage.removeItem('aitrader_ai_api_key');
     }
   }
 
   getConfig(): AIProviderConfig {
     if (typeof window !== 'undefined') {
       const p = localStorage.getItem('aitrader_ai_provider') as AIProviderId;
-      const k = localStorage.getItem('aitrader_ai_api_key');
-      if (p) return { provider: p, apiKey: k ?? undefined };
+      if (p) return { provider: p, apiKey: this.config.apiKey };
     }
     return this.config;
+  }
+
+  getAvailableProviders(): string[] {
+    const cfg = this.getConfig();
+    const list: string[] = [];
+    if (cfg.provider !== 'mock' && cfg.apiKey) {
+      list.push(cfg.provider.toUpperCase());
+    }
+    if (list.length === 0) {
+      list.push('Multi-Agent Deterministic Engine');
+    }
+    return list;
   }
 
   async generateStructuredDecision(

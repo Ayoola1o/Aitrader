@@ -176,8 +176,11 @@ function calcSupportResistance(candles: Candle[]): { support: number; resistance
 
 export class FeatureEngine {
   calculateFeatures(snapshot: MarketSnapshot): FeatureVector {
-    const candles = snapshot.candles;
-    const closes = candles.map(c => c.close);
+    // Phase 4: Strict Lookahead Bias Guard (only candles with time <= decisionTime)
+    const decisionTime = snapshot.timestamp > 0 ? snapshot.timestamp : Date.now();
+    const validCandles = snapshot.candles.filter((c) => c.time <= decisionTime);
+    const candles = validCandles.length > 0 ? validCandles : snapshot.candles;
+    const closes = candles.map((c) => c.close);
     const price = snapshot.price;
 
     if (closes.length < 3) {

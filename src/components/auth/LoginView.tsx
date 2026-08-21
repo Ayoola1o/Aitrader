@@ -26,12 +26,10 @@ interface LoginViewProps {
 
 export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
-  const [loginType, setLoginType] = useState<'email' | 'apikey'>('email');
 
   const [name, setName] = useState('Ayoola Adebisi');
   const [email, setEmail] = useState('Azahadinc');
   const [password, setPassword] = useState('Ayoola10');
-  const [apiKey, setApiKey] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
@@ -45,15 +43,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     setIsLoading(true);
 
     try {
-      if (loginType === 'apikey') {
-        const res = await sessionManager.loginWithApiKey(apiKey);
-        if (res.success && res.user) {
-          setSuccessMessage('Authenticated with API Key');
-          setTimeout(() => onLoginSuccess(res.user!), 500);
-        } else {
-          setErrorMessage(res.error || 'Failed to authenticate with API key');
-        }
-      } else if (authMode === 'signup') {
+      if (authMode === 'signup') {
         if (!email || !password) {
           setErrorMessage('Please enter email and password');
           setIsLoading(false);
@@ -88,21 +78,20 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     }
   };
 
-  const handleOAuthLogin = async (provider: 'Google' | 'GitHub' | 'Microsoft') => {
+  const handleOAuthLogin = async (provider: 'Google' | 'GitHub') => {
     setIsLoading(true);
-    // Instant demo session with provider badge
-    const demoUser: UserSession = {
-      id: `oauth-${provider.toLowerCase()}-${Date.now().toString().slice(-6)}`,
-      email: `trader.${provider.toLowerCase()}@quantarion.ai`,
-      name: `${provider} Trader`,
-      role: 'TRADER',
-      createdAt: Date.now(),
-    };
-    sessionManager.persistSession(demoUser);
-    setTimeout(() => {
-      onLoginSuccess(demoUser);
+    setErrorMessage(null);
+    try {
+      const res = await sessionManager.signInWithOAuth(provider.toLowerCase() as 'google' | 'github');
+      if (!res.success) {
+        setErrorMessage(res.error || `Failed to initialize ${provider} OAuth`);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorMessage(msg);
+    } finally {
       setIsLoading(false);
-    }, 600);
+    }
   };
 
   return (
@@ -238,32 +227,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
               </p>
             </div>
 
-            {/* Email / API Key Tab Switcher */}
-            <div className="flex border-b border-gray-800 text-xs font-semibold">
-              <button
-                type="button"
-                onClick={() => setLoginType('email')}
-                className={`pb-3 flex-1 text-center transition-all ${
-                  loginType === 'email'
-                    ? 'text-cyan-400 border-b-2 border-cyan-400 font-bold'
-                    : 'text-gray-400 hover:text-gray-200'
-                }`}
-              >
-                Email Login
-              </button>
-              <button
-                type="button"
-                onClick={() => setLoginType('apikey')}
-                className={`pb-3 flex-1 text-center transition-all ${
-                  loginType === 'apikey'
-                    ? 'text-cyan-400 border-b-2 border-cyan-400 font-bold'
-                    : 'text-gray-400 hover:text-gray-200'
-                }`}
-              >
-                API Key Login
-              </button>
-            </div>
-
             {/* Alerts */}
             {errorMessage && (
               <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-400 text-xs flex items-center gap-2">
@@ -280,102 +243,77 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
 
             {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-4">
-              {loginType === 'email' ? (
-                <>
-                  {authMode === 'signup' && (
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">
-                        FULL NAME
-                      </label>
-                      <div className="relative">
-                        <input
-                          type="text"
-                          required
-                          placeholder="Ayoola Adebisi"
-                          value={name}
-                          onChange={(e) => setName(e.target.value)}
-                          className="w-full bg-[#070D18] border border-gray-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-cyan-500 transition-colors"
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Email */}
-                  <div className="space-y-1.5">
-                    <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">
-                      EMAIL ADDRESS
-                    </label>
-                    <div className="relative">
-                      <Mail className="w-4 h-4 text-gray-500 absolute left-3.5 top-3" />
-                      <input
-                        type="email"
-                        required
-                        placeholder="trader@quantarion.ai"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        className="w-full bg-[#070D18] border border-gray-800 rounded-xl pl-10 pr-3 py-2.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-cyan-500 transition-colors"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Password */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
-                        PASSWORD
-                      </label>
-                      {authMode === 'signin' && (
-                        <button
-                          type="button"
-                          onClick={() => alert('Password reset link sent to your registered email.')}
-                          className="text-[11px] text-cyan-400 hover:underline"
-                        >
-                          Forgot password?
-                        </button>
-                      )}
-                    </div>
-                    <div className="relative">
-                      <Lock className="w-4 h-4 text-gray-500 absolute left-3.5 top-3" />
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        required
-                        placeholder="••••••••"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        className="w-full bg-[#070D18] border border-gray-800 rounded-xl pl-10 pr-10 py-2.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-cyan-500 transition-colors"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3.5 top-3 text-gray-500 hover:text-gray-300"
-                      >
-                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                /* API Key Input */
+              {authMode === 'signup' && (
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">
-                    INSTITUTIONAL QUANT API KEY
+                    FULL NAME
                   </label>
                   <div className="relative">
-                    <Key className="w-4 h-4 text-gray-500 absolute left-3.5 top-3" />
                     <input
-                      type="password"
+                      type="text"
                       required
-                      placeholder="APCA-KEY-..."
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                      className="w-full bg-[#070D18] border border-gray-800 rounded-xl pl-10 pr-3 py-2.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-cyan-500 font-mono transition-colors"
+                      placeholder="Ayoola Adebisi"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full bg-[#070D18] border border-gray-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-cyan-500 transition-colors"
                     />
                   </div>
-                  <p className="text-[10px] text-gray-500">
-                    Use your Alpaca or Quantarion Master Key for instant session sync.
-                  </p>
                 </div>
               )}
+
+              {/* Email */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">
+                  EMAIL ADDRESS
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-gray-500 absolute left-3.5 top-3" />
+                  <input
+                    type="email"
+                    required
+                    placeholder="trader@quantarion.ai"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full bg-[#070D18] border border-gray-800 rounded-xl pl-10 pr-3 py-2.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-cyan-500 transition-colors"
+                  />
+                </div>
+              </div>
+
+              {/* Password */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                    PASSWORD
+                  </label>
+                  {authMode === 'signin' && (
+                    <button
+                      type="button"
+                      onClick={() => alert('Password reset link sent to your registered email.')}
+                      className="text-[11px] text-cyan-400 hover:underline"
+                    >
+                      Forgot password?
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-gray-500 absolute left-3.5 top-3" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full bg-[#070D18] border border-gray-800 rounded-xl pl-10 pr-10 py-2.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-cyan-500 transition-colors"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3.5 top-3 text-gray-500 hover:text-gray-300"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
 
               {/* Submit Button */}
               <button
@@ -395,75 +333,64 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
             </form>
 
             {/* Social OAuth */}
-            {loginType === 'email' && (
-              <div className="space-y-3 pt-1">
-                <div className="relative flex items-center justify-center">
-                  <div className="border-t border-gray-800 w-full" />
-                  <span className="bg-[#0B111E] px-3 text-[10px] text-gray-500 uppercase tracking-wider font-semibold">
-                    OR CONTINUE WITH
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleOAuthLogin('Google')}
-                    className="p-2 rounded-xl bg-[#070D18] border border-gray-800 hover:border-gray-700 text-xs font-semibold text-gray-300 flex items-center justify-center gap-1.5 transition-colors"
-                  >
-                    <span className="font-bold text-rose-400">G</span> Google
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleOAuthLogin('GitHub')}
-                    className="p-2 rounded-xl bg-[#070D18] border border-gray-800 hover:border-gray-700 text-xs font-semibold text-gray-300 flex items-center justify-center gap-1.5 transition-colors"
-                  >
-                    <span className="font-bold text-gray-300">🐙</span> GitHub
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleOAuthLogin('Microsoft')}
-                    className="p-2 rounded-xl bg-[#070D18] border border-gray-800 hover:border-gray-700 text-xs font-semibold text-gray-300 flex items-center justify-center gap-1.5 transition-colors"
-                  >
-                    <span className="font-bold text-blue-400">❖</span> Microsoft
-                  </button>
-                </div>
+            <div className="space-y-3 pt-1">
+              <div className="relative flex items-center justify-center">
+                <div className="border-t border-gray-800 w-full" />
+                <span className="bg-[#0B111E] px-3 text-[10px] text-gray-500 uppercase tracking-wider font-semibold">
+                  OR CONTINUE WITH
+                </span>
               </div>
-            )}
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleOAuthLogin('Google')}
+                  className="p-2.5 rounded-xl bg-[#070D18] border border-gray-800 hover:border-gray-700 text-xs font-semibold text-gray-300 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                >
+                  <span className="font-bold text-rose-400">G</span> Google
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOAuthLogin('GitHub')}
+                  className="p-2.5 rounded-xl bg-[#070D18] border border-gray-800 hover:border-gray-700 text-xs font-semibold text-gray-300 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                >
+                  <span className="font-bold text-gray-300">🐙</span> GitHub
+                </button>
+              </div>
+            </div>
 
             {/* Toggle Mode */}
-            {loginType === 'email' && (
-              <div className="text-center text-xs text-gray-400 pt-2">
-                {authMode === 'signin' ? (
-                  <span>
-                    Don&apos;t have an account?{' '}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAuthMode('signup');
-                        setErrorMessage(null);
-                      }}
-                      className="text-cyan-400 font-bold hover:underline"
-                    >
-                      Sign up
-                    </button>
-                  </span>
-                ) : (
-                  <span>
-                    Already have an account?{' '}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAuthMode('signin');
-                        setErrorMessage(null);
-                      }}
-                      className="text-cyan-400 font-bold hover:underline"
-                    >
-                      Sign in
-                    </button>
-                  </span>
-                )}
-              </div>
-            )}
+            <div className="text-center text-xs text-gray-400 pt-2">
+              {authMode === 'signin' ? (
+                <span>
+                  Don&apos;t have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('signup');
+                      setErrorMessage(null);
+                    }}
+                    className="text-cyan-400 font-bold hover:underline"
+                  >
+                    Sign up
+                  </button>
+                </span>
+              ) : (
+                <span>
+                  Already have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('signin');
+                      setErrorMessage(null);
+                    }}
+                    className="text-cyan-400 font-bold hover:underline"
+                  >
+                    Sign in
+                  </button>
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseManager, BotSessionRecord } from '@/lib/db/supabase';
 import { SymbolId } from '@/types/trading';
+import { authenticateRequest, unauthorizedResponse } from '@/lib/server/auth';
+import { checkRateLimit, rateLimitResponse } from '@/lib/server/rateLimit';
+import { auditLogger } from '@/lib/server/audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -107,7 +110,10 @@ let inMemoryBots: BotStateItem[] = [
   },
 ];
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const rate = checkRateLimit(req, { limit: 120, windowMs: 60000 });
+  if (!rate.allowed) return rateLimitResponse(rate.retryAfter);
+
   try {
     return NextResponse.json({
       success: true,
@@ -120,6 +126,14 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const rate = checkRateLimit(req, { limit: 60, windowMs: 60000 });
+  if (!rate.allowed) return rateLimitResponse(rate.retryAfter);
+
+  const auth = await authenticateRequest(req);
+  if (!auth.authenticated || !auth.user) {
+    return unauthorizedResponse('Authentication required to modify bot runtime state.');
+  }
+
   try {
     const body = await req.json();
     const action = body.action || 'START';

@@ -80,12 +80,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [confidenceThreshold, setConfidenceThreshold] = useState<number>(DEFAULT_SETTINGS.confidenceThreshold);
   const [startingBalance, setStartingBalance] = useState<number>(DEFAULT_SETTINGS.startingBalance);
 
-  // ── Telegram Notifications State ─────────────────────────────────────────────
+  // ── Telegram Notifications & Scheduled Intelligence Brief State (Item 32) ──
   const [telegramToken, setTelegramToken] = useState<string>('');
   const [telegramChatId, setTelegramChatId] = useState<string>('');
   const [telegramEnabled, setTelegramEnabled] = useState<boolean>(true);
   const [telegramStatus, setTelegramStatus] = useState<string>('Connected');
   const [telegramLatency, setTelegramLatency] = useState<string>('310ms');
+  const [periodicSummaryEnabled, setPeriodicSummaryEnabled] = useState<boolean>(true);
+  const [summaryIntervalMinutes, setSummaryIntervalMinutes] = useState<number>(60);
+  const [notifyBotFleetSummary, setNotifyBotFleetSummary] = useState<boolean>(true);
+  const [notifyAccountStatus, setNotifyAccountStatus] = useState<boolean>(true);
+  const [notifyAccountPerformance, setNotifyAccountPerformance] = useState<boolean>(true);
+  const [notifyBotPerformance, setNotifyBotPerformance] = useState<boolean>(true);
+  const [notifyHeartbeat, setNotifyHeartbeat] = useState<boolean>(true);
+  const [notifyTrades, setNotifyTrades] = useState<boolean>(true);
+  const [notifyPositionClose, setNotifyPositionClose] = useState<boolean>(true);
+  const [notifyRiskAlerts, setNotifyRiskAlerts] = useState<boolean>(true);
+  const [isSendingTestBrief, setIsSendingTestBrief] = useState<boolean>(false);
 
   // ── Alpaca Credentials State ─────────────────────────────────────────────────
   const [alpacaApiKey, setAlpacaApiKey] = useState<string>(() => {
@@ -162,8 +173,72 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setTelegramToken(tg.botToken || '');
       setTelegramChatId(tg.chatId || '');
       setTelegramEnabled(tg.enabled ?? true);
+      setPeriodicSummaryEnabled(tg.periodicSummaryEnabled ?? true);
+      setSummaryIntervalMinutes(tg.summaryIntervalMinutes ?? 60);
+      setNotifyBotFleetSummary(tg.notifyBotFleetSummary ?? true);
+      setNotifyAccountStatus(tg.notifyAccountStatus ?? true);
+      setNotifyAccountPerformance(tg.notifyAccountPerformance ?? true);
+      setNotifyBotPerformance(tg.notifyBotPerformance ?? true);
+      setNotifyHeartbeat(tg.notifyHeartbeat ?? true);
+      setNotifyTrades(tg.notifyTrades ?? true);
+      setNotifyPositionClose(tg.notifyPositionClose ?? true);
+      setNotifyRiskAlerts(tg.notifyRiskAlerts ?? true);
     }
   }, []);
+
+  // Send Test Fleet Summary
+  const handleSendTestSummary = async () => {
+    setIsSendingTestBrief(true);
+    try {
+      await telegramService.sendPeriodicFleetSummary({
+        equity: 104250.0,
+        cash: 68450.0,
+        buyingPower: 136900.0,
+        marginUtilPercent: 34.3,
+        dailyPnL: 450.0,
+        dailyReturnPercent: 0.61,
+        totalPnL: 4064.50,
+        winRate: 71.4,
+        tradeCount: 14,
+        runningBots: [
+          {
+            id: 'bot-btc-1',
+            name: 'BTC Momentum Core',
+            symbol: 'BTCUSDT',
+            mode: 'PAPER',
+            status: 'RUNNING',
+            allocatedCapital: 10000,
+            todayPnL: 482.18,
+            totalPnL: 1450.20,
+            winRate: 67.8,
+            currentPos: {
+              side: 'LONG',
+              size: 0.15,
+              unrealizedPnL: 96.0,
+              stopLoss: 63300.0,
+              takeProfit: 66500.0,
+            },
+          },
+          {
+            id: 'bot-eth-1',
+            name: 'ETH Mean Reversion',
+            symbol: 'ETHUSDT',
+            mode: 'PAPER',
+            status: 'RUNNING',
+            allocatedCapital: 10000,
+            todayPnL: 153.32,
+            totalPnL: 820.50,
+            winRate: 75.0,
+          },
+        ],
+      });
+      alert('✅ Periodic Fleet Summary intelligence test broadcast sent to Telegram!');
+    } catch {
+      alert('Failed to dispatch test summary broadcast.');
+    } finally {
+      setIsSendingTestBrief(false);
+    }
+  };
 
   // Handle Save All Settings
   const handleSaveAll = () => {
@@ -186,23 +261,57 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     });
 
     if (typeof window !== 'undefined') {
-      localStorage.setItem('aitrader_alpaca_api_key', alpacaApiKey);
-      localStorage.setItem('aitrader_alpaca_secret_key', alpacaSecretKey);
       localStorage.setItem('aitrader_supabase_url', supabaseUrl);
       localStorage.setItem('aitrader_supabase_anon_key', supabaseAnonKey);
       localStorage.setItem('aitrader_ai_provider', aiProvider);
-      localStorage.setItem('aitrader_ai_api_key', aiApiKey);
+      // Security Hardening (Phase 1): Never persist raw credentials to localStorage
+      localStorage.removeItem('aitrader_alpaca_api_key');
+      localStorage.removeItem('aitrader_alpaca_secret_key');
+      localStorage.removeItem('aitrader_ai_api_key');
+      localStorage.removeItem('aitrader_telegram_token');
     }
+
+    // Phase 2: Async sync to Supabase server settings
+    try {
+      fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          risk_settings: { maxRisk, maxDrawdown, minRR, killSwitch, confidenceThreshold, startingBalance },
+          ai_settings: { provider: aiProvider },
+          notification_settings: {
+            telegramEnabled,
+            chatId: telegramChatId,
+            periodicSummaryEnabled,
+            summaryIntervalMinutes,
+            notifyBotFleetSummary,
+            notifyAccountStatus,
+            notifyAccountPerformance,
+            notifyBotPerformance,
+            notifyHeartbeat,
+            notifyTrades,
+            notifyPositionClose,
+            notifyRiskAlerts,
+          },
+        }),
+      }).catch(() => {});
+    } catch {}
 
     if (telegramToken && telegramChatId) {
       telegramService.saveConfig({
         botToken: telegramToken,
         chatId: telegramChatId,
         enabled: telegramEnabled,
-        notifyHeartbeat: true,
-        notifyTrades: true,
-        notifyPositionClose: true,
-        notifyRiskAlerts: true,
+        periodicSummaryEnabled,
+        summaryIntervalMinutes,
+        notifyBotFleetSummary,
+        notifyAccountStatus,
+        notifyAccountPerformance,
+        notifyBotPerformance,
+        notifyHeartbeat,
+        notifyTrades,
+        notifyPositionClose,
+        notifyRiskAlerts,
       });
     }
 
@@ -1443,17 +1552,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* 4. Telegram Modal */}
       {activeModal === 'TELEGRAM' && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-[#0B111E] border border-gray-800 rounded-2xl max-w-md w-full p-6 text-xs space-y-4 shadow-2xl">
+          <div className="bg-[#0B111E] border border-gray-800 rounded-2xl max-w-lg w-full p-6 text-xs space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
             <div className="flex items-center justify-between pb-3 border-b border-gray-800">
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-full bg-blue-400" />
-                <h3 className="text-sm font-black text-white">Configure Telegram Notifications</h3>
+                <h3 className="text-sm font-black text-white">Configure Telegram Command & Intelligence Center</h3>
               </div>
               <button onClick={() => setActiveModal(null)} className="text-gray-400 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
+            {/* Credentials */}
             <div className="space-y-3">
               <div>
                 <label className="text-gray-300 font-bold block mb-1">Bot Token</label>
@@ -1466,7 +1576,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 />
               </div>
               <div>
-                <label className="text-gray-300 font-bold block mb-1">Chat ID</label>
+                <label className="text-gray-300 font-bold block mb-1">Authorized Chat ID</label>
                 <input
                   type="text"
                   value={telegramChatId}
@@ -1475,6 +1585,104 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   className="w-full bg-[#080E1A] border border-gray-700 rounded-xl p-2.5 text-white font-mono"
                 />
               </div>
+            </div>
+
+            {/* Periodic Intelligence Summary Push Settings (Item 32) */}
+            <div className="p-3.5 rounded-xl bg-[#080E1A] border border-gray-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-bold text-white text-xs">📊 Scheduled Intelligence Briefs</div>
+                  <div className="text-[10px] text-gray-400">Send periodic fleet and account summary to Telegram</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={periodicSummaryEnabled}
+                  onChange={(e) => setPeriodicSummaryEnabled(e.target.checked)}
+                  className="w-4 h-4 accent-blue-500 rounded cursor-pointer"
+                />
+              </div>
+
+              {periodicSummaryEnabled && (
+                <div className="space-y-2.5 pt-2 border-t border-gray-800 text-[11px]">
+                  <div>
+                    <label className="text-gray-300 font-bold block mb-1">Broadcast Interval</label>
+                    <select
+                      value={summaryIntervalMinutes}
+                      onChange={(e) => setSummaryIntervalMinutes(parseInt(e.target.value))}
+                      className="w-full bg-[#0B111E] border border-gray-700 rounded-lg p-2 text-white font-bold"
+                    >
+                      <option value={15}>Every 15 Minutes</option>
+                      <option value={30}>Every 30 Minutes</option>
+                      <option value={60}>Every 1 Hour (Standard)</option>
+                      <option value={120}>Every 2 Hours</option>
+                      <option value={240}>Every 4 Hours</option>
+                      <option value={480}>Every 8 Hours</option>
+                      <option value={1440}>Every 24 Hours (Daily Brief)</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5 pt-1">
+                    <div className="text-[10px] uppercase font-bold text-gray-500">Telemetry Sections to Include:</div>
+                    <label className="flex items-center justify-between p-1.5 rounded-lg bg-[#0B111E] border border-gray-800/80 cursor-pointer">
+                      <span className="text-gray-300">🤖 Active Bot Fleet Summary</span>
+                      <input
+                        type="checkbox"
+                        checked={notifyBotFleetSummary}
+                        onChange={(e) => setNotifyBotFleetSummary(e.target.checked)}
+                        className="accent-blue-500 rounded"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between p-1.5 rounded-lg bg-[#0B111E] border border-gray-800/80 cursor-pointer">
+                      <span className="text-gray-300">💰 Account Status & Margin Utilization</span>
+                      <input
+                        type="checkbox"
+                        checked={notifyAccountStatus}
+                        onChange={(e) => setNotifyAccountStatus(e.target.checked)}
+                        className="accent-blue-500 rounded"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between p-1.5 rounded-lg bg-[#0B111E] border border-gray-800/80 cursor-pointer">
+                      <span className="text-gray-300">📈 Account P&L & Return Analytics</span>
+                      <input
+                        type="checkbox"
+                        checked={notifyAccountPerformance}
+                        onChange={(e) => setNotifyAccountPerformance(e.target.checked)}
+                        className="accent-blue-500 rounded"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between p-1.5 rounded-lg bg-[#0B111E] border border-gray-800/80 cursor-pointer">
+                      <span className="text-gray-300">📊 Individual Bot Performance & Positions</span>
+                      <input
+                        type="checkbox"
+                        checked={notifyBotPerformance}
+                        onChange={(e) => setNotifyBotPerformance(e.target.checked)}
+                        className="accent-blue-500 rounded"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between p-1.5 rounded-lg bg-[#0B111E] border border-gray-800/80 cursor-pointer">
+                      <span className="text-gray-300">💓 24/7 Heartbeat & Subsystem Matrix</span>
+                      <input
+                        type="checkbox"
+                        checked={notifyHeartbeat}
+                        onChange={(e) => setNotifyHeartbeat(e.target.checked)}
+                        className="accent-blue-500 rounded"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      disabled={isSendingTestBrief}
+                      onClick={handleSendTestSummary}
+                      className="w-full py-2 px-3 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-cyan-300 border border-blue-500/30 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                    >
+                      {isSendingTestBrief ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : '⚡'}
+                      <span>{isSendingTestBrief ? 'Sending Broadcast...' : 'Send Test Summary Broadcast Now'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-2 pt-3 border-t border-gray-800">
@@ -1488,7 +1696,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 }}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg"
               >
-                Save Telegram
+                Save Settings
               </button>
             </div>
           </div>

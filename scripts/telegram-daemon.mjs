@@ -1,8 +1,33 @@
 // Standalone 24/7 Telegram Long-Polling Daemon for AI Quant Trader
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8792678651:AAE5-lzD_ZPkWPG-EvbksmPDloP2pUTAwm4';
-const DEFAULT_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '8934734450';
+import fs from 'node:fs';
+import path from 'node:path';
 
-console.log('[TelegramDaemon] Starting autonomous Telegram listener with token:', BOT_TOKEN.slice(0, 10) + '...');
+// Load .env.local if present
+try {
+  const envPath = path.resolve(process.cwd(), '.env.local');
+  if (fs.existsSync(envPath)) {
+    const envContent = fs.readFileSync(envPath, 'utf8');
+    for (const line of envContent.split('\n')) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+        const [k, ...v] = trimmed.split('=');
+        if (k && !process.env[k.trim()]) {
+          process.env[k.trim()] = v.join('=').trim();
+        }
+      }
+    }
+  }
+} catch {}
+
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const DEFAULT_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+
+if (!BOT_TOKEN) {
+  console.error('\x1b[31m[TelegramDaemon Error]\x1b[0m TELEGRAM_BOT_TOKEN is not set in environment or .env.local.');
+  process.exit(1);
+}
+
+console.log('[TelegramDaemon] Starting autonomous Telegram listener with token:', BOT_TOKEN.slice(0, 8) + '••••');
 
 async function fetchLiveTicker(sym = 'BTCUSDT') {
   try {

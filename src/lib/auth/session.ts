@@ -8,7 +8,6 @@ export interface UserSession {
   name: string;
   role: 'TRADER' | 'ADMIN' | 'QUANT';
   createdAt: number;
-  isApiAuth?: boolean;
 }
 
 const SESSION_KEY = 'aitrader_user_session';
@@ -53,7 +52,6 @@ export const sessionManager = {
         }
       }
 
-      // If Supabase is unconfigured, provide structured error instead of silent mock bypass in production
       return {
         success: false,
         error: 'Authentication failed. Please verify your Supabase credentials or network connection.',
@@ -102,37 +100,53 @@ export const sessionManager = {
     }
   },
 
-  async loginWithApiKey(apiKey: string): Promise<{ success: boolean; error?: string; user?: UserSession }> {
-    if (!apiKey || apiKey.trim().length < 16) {
-      return { success: false, error: 'Invalid Institutional API Key format (minimum 16 chars required)' };
-    }
+  /**
+   * Real Supabase OAuth sign in (Item 12)
+   */
+  async signInWithOAuth(provider: 'google' | 'github'): Promise<{ success: boolean; error?: string }> {
+    try {
+      const client = supabaseManager.getClient();
+      if (!client) {
+        return { success: false, error: 'Supabase is not configured for OAuth authentication.' };
+      }
 
-    const user: UserSession = {
-      id: `usr-key-${apiKey.slice(0, 8)}`,
-      email: `quant-${apiKey.slice(0, 6)}@quantarion.ai`,
-      name: `Institutional Quant (${apiKey.slice(0, 4)}***)`,
-      role: 'QUANT',
-      createdAt: Date.now(),
-      isApiAuth: true,
-    };
+      const { error } = await client.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
+        },
+      });
 
-    this.persistSession(user);
-    return { success: true, user };
-  },
+      if (error) {
+        return { success: false, error: error.message };
+      }
 
-  logout() {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(SESSION_KEY);
-    }
-    const client = supabaseManager.getClient();
-    if (client) {
-      client.auth.signOut().catch(() => {});
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, error: msg };
     }
   },
 
   persistSession(user: UserSession) {
     if (typeof window !== 'undefined') {
-      localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+      try {
+        localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+      } catch {}
+    }
+  },
+
+  async logout(): Promise<void> {
+    const client = supabaseManager.getClient();
+    if (client) {
+      try {
+        await client.auth.signOut();
+      } catch {}
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem(SESSION_KEY);
+      } catch {}
     }
   },
 };

@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { checkRateLimit, rateLimitResponse } from '@/lib/server/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,7 +45,10 @@ const SECTION_NAMES = [
   'Whales & Copy Mirrors',
 ];
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const rate = checkRateLimit(req, { limit: 120, windowMs: 60000 });
+  if (!rate.allowed) return rateLimitResponse(rate.retryAfter);
+
   try {
     const filePath = path.join(process.cwd(), 'skills', 'senpi=staregies', 'catalog.json');
     if (!fs.existsSync(filePath)) {

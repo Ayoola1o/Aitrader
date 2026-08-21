@@ -216,8 +216,21 @@ export interface DecisionRecord {
   realizedPnL?: number;
 }
 
+export type OrderStatus =
+  | 'CREATED'
+  | 'SUBMITTED'
+  | 'ACKNOWLEDGED'
+  | 'PENDING'
+  | 'PARTIALLY_FILLED'
+  | 'FILLED'
+  | 'CANCEL_PENDING'
+  | 'CANCELLED'
+  | 'REJECTED'
+  | 'FAILED';
+
 export interface Order {
   id: string;
+  clientOrderId?: string;
   decisionId?: string;
   timestamp: number;
   symbol: SymbolId;
@@ -225,9 +238,10 @@ export interface Order {
   type: 'MARKET' | 'LIMIT' | 'STOP_LOSS' | 'TAKE_PROFIT';
   price: number;
   size: number;
+  filledSize?: number;
   stopPrice?: number;
   takeProfitPrice?: number;
-  status: 'PENDING' | 'FILLED' | 'PARTIALLY_FILLED' | 'CANCELLED' | 'REJECTED';
+  status: OrderStatus;
   filledPrice?: number;
   slippage?: number;
   fee?: number;

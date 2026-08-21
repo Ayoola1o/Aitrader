@@ -25,6 +25,44 @@ export interface BotSessionRecord {
   stopped_at?: string;
 }
 
+export interface CloudBotRecord {
+  bot_id: string;
+  user_id: string;
+  name: string;
+  symbol: string;
+  strategy: string;
+  allocated_capital: number;
+  cycle_interval_seconds: number;
+  cycles_completed: number;
+  trades_executed: number;
+  pnl: number;
+  status: 'RUNNING' | 'PAUSED' | 'STOPPED' | 'IDLE';
+  created_at?: string;
+  updated_at?: string;
+}
+
+// ── Item 10: Database Security Client Split ───────────────────────────────────
+export function getBrowserSupabaseClient(): SupabaseClient | null {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+  if (!url || !anonKey) return null;
+  return createClient(url, anonKey, { auth: { persistSession: true } });
+}
+
+export function getServerSupabaseAdminClient(): SupabaseClient | null {
+  if (typeof window !== 'undefined') {
+    console.error('[Security] Attempted to instantiate Supabase Admin Client in browser context.');
+    return null;
+  }
+
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
+
+  if (!url || !serviceKey) return null;
+  return createClient(url, serviceKey, { auth: { persistSession: false } });
+}
+
 class SupabaseManager {
   private client: SupabaseClient | null = null;
   private config: SupabaseConfig | null = null;
@@ -34,21 +72,23 @@ class SupabaseManager {
   }
 
   private init() {
-    let url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    let anonKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    let url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
+    let anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 
     if (typeof window !== 'undefined') {
       const storedUrl = localStorage.getItem('aitrader_supabase_url');
       const storedKey = localStorage.getItem('aitrader_supabase_anon_key');
       if (storedUrl) url = storedUrl;
       if (storedKey) anonKey = storedKey;
+    } else {
+      anonKey = process.env.SUPABASE_SERVICE_ROLE_KEY || anonKey;
     }
 
     if (url && anonKey) {
       try {
         this.config = { url, anonKey };
         this.client = createClient(url, anonKey, {
-          auth: { persistSession: false },
+          auth: { persistSession: typeof window !== 'undefined' },
         });
       } catch (err) {
         console.warn('[SupabaseManager] Initialization error:', err);
@@ -71,7 +111,7 @@ class SupabaseManager {
 
       this.config = { url, anonKey };
       this.client = createClient(url, anonKey, {
-        auth: { persistSession: false },
+        auth: { persistSession: typeof window !== 'undefined' },
       });
 
       if (typeof window !== 'undefined') {
@@ -120,7 +160,70 @@ class SupabaseManager {
     }
   }
 
-  // ── Bot State Cloud Persistence ───────────────────────────────────────────────
+  // ── Multi-Bot Scheduler Persistence (Item 9) ──────────────────────────────────
+  async getAllActiveBots(): Promise<CloudBotRecord[]> {
+    const client = this.getClient();
+    if (!client) return [];
+    try {
+      const { data, error } = await client
+        .from('user_bots')
+        .select('*')
+        .eq('status', 'RUNNING');
+
+      if (error || !Array.isArray(data)) return [];
+      return data as CloudBotRecord[];
+    } catch {
+      return [];
+    }
+  }
+
+  async recordBotRun(run: {
+    bot_id: string;
+    cycle_number: number;
+    pnl: number;
+    trades_executed: number;
+    last_action: string;
+    timestamp?: string;
+  }): Promise<boolean> {
+    const client = this.getClient();
+    if (!client) return false;
+    try {
+      const { error } = await client.from('bot_runs').insert({
+        bot_id: run.bot_id,
+        cycle_number: run.cycle_number,
+        pnl: run.pnl,
+        trades_executed: run.trades_executed,
+        last_action: run.last_action,
+        timestamp: run.timestamp || new Date().toISOString(),
+      });
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  async recordBotEvent(event: {
+    bot_id: string;
+    event_type: 'INFO' | 'ACTION' | 'WARN' | 'ERROR';
+    message: string;
+    timestamp?: string;
+  }): Promise<boolean> {
+    const client = this.getClient();
+    if (!client) return false;
+    try {
+      const { error } = await client.from('bot_events').insert({
+        bot_id: event.bot_id,
+        event_type: event.event_type,
+        message: event.message,
+        timestamp: event.timestamp || new Date().toISOString(),
+      });
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  // ── Bot State Cloud Persistence (Legacy Session Compatible) ──────────────────
   async getActiveBotSession(): Promise<BotSessionRecord | null> {
     const client = this.getClient();
     if (!client) return null;
@@ -219,7 +322,7 @@ class SupabaseManager {
       const { data, error } = await client
         .from('user_profiles')
         .select('*')
-        .eq('user_id', userId)
+        .eq('id', userId)
         .maybeSingle();
       if (error || !data) return null;
       return data;
@@ -234,10 +337,106 @@ class SupabaseManager {
     try {
       const { error } = await client
         .from('user_profiles')
-        .upsert({ ...profile, user_id: userId, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+        .upsert({ ...profile, id: userId, updated_at: new Date().toISOString() }, { onConflict: 'id' });
       return !error;
     } catch {
       return false;
+    }
+  }
+
+  // ── Phase 2: User-Isolated Settings Persistence ─────────────────────────────
+  async getUserSettings(userId: string): Promise<Record<string, unknown> | null> {
+    const client = this.getClient();
+    if (!client || !userId) return null;
+    try {
+      const { data, error } = await client
+        .from('user_settings')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (error || !data) return null;
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  async saveUserSettings(userId: string, settings: Record<string, unknown>): Promise<boolean> {
+    const client = this.getClient();
+    if (!client || !userId) return false;
+    try {
+      const { error } = await client
+        .from('user_settings')
+        .upsert({ ...settings, user_id: userId, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  // ── Phase 2: Broker Connection State Persistence ────────────────────────────
+  async getBrokerConnection(userId: string): Promise<Record<string, unknown> | null> {
+    const client = this.getClient();
+    if (!client || !userId) return null;
+    try {
+      const { data, error } = await client
+        .from('broker_connections')
+        .select('broker_name, account_type, connection_status, account_number, buying_power, cash_balance, currency, last_synced_at')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (error || !data) return null;
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  async saveBrokerConnection(userId: string, conn: Record<string, unknown>): Promise<boolean> {
+    const client = this.getClient();
+    if (!client || !userId) return false;
+    try {
+      const { error } = await client
+        .from('broker_connections')
+        .upsert({ ...conn, user_id: userId, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  // ── Phase 2: AI Decision Journal Persistence ────────────────────────────────
+  async saveAIDecision(record: Record<string, unknown>): Promise<boolean> {
+    const client = getServerSupabaseAdminClient() || this.getClient();
+    if (!client) return false;
+    try {
+      const { error } = await client
+        .from('ai_decisions')
+        .upsert(record, { onConflict: 'decision_id' });
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  async getAIDecisions(userId?: string, limit = 50): Promise<Record<string, unknown>[]> {
+    const client = this.getClient();
+    if (!client) return [];
+    try {
+      let query = client
+        .from('ai_decisions')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (userId) {
+        query = query.eq('user_id', userId);
+      }
+
+      const { data, error } = await query;
+      if (error || !data) return [];
+      return data;
+    } catch {
+      return [];
     }
   }
 }

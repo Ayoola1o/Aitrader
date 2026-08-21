@@ -188,32 +188,74 @@ export class SpecialistAgentSystem {
     );
   }
 
-  // 5. Positioning Agent
+  // 5. Positioning Agent (Item 18: Explicit Derivatives DataStatus & Zero Synthetic Inference)
   private positioningAgent(features: FeatureVector, snapshot: MarketSnapshot): AgentSignal {
-    const { fundingDivergence, crowdedPositioning } = features;
-    const funding = snapshot.fundingRate;
+    const { fundingRate, openInterest, longShortRatio, liquidations24h, dataQuality } = snapshot;
+    const { crowdedPositioning } = features;
 
-    if (funding === null) {
-      return makeSignal('positioning', 'Positioning Agent', 'NO_TRADE', 'UNAVAILABLE', 0.5, 0.0,
-        'Funding rate data UNAVAILABLE. No positioning signal.',
-        [{ label: 'Funding Rate', value: 'UNAVAILABLE', signal: 'NEUTRAL' }],
-        ['No funding data source connected'],
-        { fundingRate: 'N/A' }, 'UNAVAILABLE'
+    const isFundingAvail = dataQuality.fundingStatus === 'LIVE' && fundingRate !== null;
+    const isOiAvail = dataQuality.openInterestStatus === 'LIVE' && openInterest !== null;
+
+    if (!isFundingAvail && !isOiAvail) {
+      return makeSignal(
+        'positioning',
+        'Positioning Agent',
+        'NO_TRADE',
+        'UNAVAILABLE',
+        0.5,
+        0.0,
+        'Derivatives positioning data UNAVAILABLE (Funding & Open Interest unverified). Agent abstaining.',
+        [
+          { label: 'Funding Rate', value: 'UNAVAILABLE', signal: 'NEUTRAL' },
+          { label: 'Open Interest', value: 'UNAVAILABLE', signal: 'NEUTRAL' },
+          { label: 'Long/Short Ratio', value: 'UNAVAILABLE', signal: 'NEUTRAL' },
+          { label: '24h Liquidations', value: 'UNAVAILABLE', signal: 'NEUTRAL' },
+        ],
+        ['No live derivatives feed available — synthetic inference forbidden'],
+        { fundingRate: 'UNAVAILABLE', openInterest: 'UNAVAILABLE' },
+        'UNAVAILABLE'
       );
     }
 
-    const evidence: Evidence[] = [
-      { label: 'Funding Rate', value: (funding * 100).toFixed(4) + '%', signal: funding > 0.001 ? 'BEARISH' : funding < -0.001 ? 'BULLISH' : 'NEUTRAL' },
-      { label: 'Crowd Positioning', value: crowdedPositioning, signal: crowdedPositioning === 'LONG' ? 'BEARISH' : crowdedPositioning === 'SHORT' ? 'BULLISH' : 'NEUTRAL' },
-    ];
+    const evidence: Evidence[] = [];
+    if (isFundingAvail && fundingRate !== null) {
+      evidence.push({
+        label: 'Funding Rate',
+        value: (fundingRate * 100).toFixed(4) + '%',
+        signal: fundingRate > 0.0005 ? 'BEARISH' : fundingRate < -0.0005 ? 'BULLISH' : 'NEUTRAL',
+      });
+    }
+    if (isOiAvail && openInterest !== null) {
+      evidence.push({
+        label: 'Open Interest',
+        value: `$${(openInterest).toLocaleString()}`,
+        signal: 'NEUTRAL',
+      });
+    }
+    if (longShortRatio !== null) {
+      evidence.push({
+        label: 'Long/Short Ratio',
+        value: longShortRatio.toFixed(2),
+        signal: longShortRatio > 1.8 ? 'BEARISH' : longShortRatio < 0.6 ? 'BULLISH' : 'NEUTRAL',
+      });
+    }
 
     const action: ActionType = crowdedPositioning === 'LONG' ? 'SELL' : crowdedPositioning === 'SHORT' ? 'BUY' : 'HOLD';
-    return makeSignal('positioning', 'Positioning Agent', action,
+    return makeSignal(
+      'positioning',
+      'Positioning Agent',
+      action,
       crowdedPositioning === 'LONG' ? 'BEARISH' : crowdedPositioning === 'SHORT' ? 'BULLISH' : 'NEUTRAL',
-      0.5, 0.55,
-      `Funding ${(funding * 100).toFixed(4)}%. Crowd: ${crowdedPositioning}.`,
-      evidence, [],
-      { fundingRate: (funding * 100).toFixed(4) + '%', crowded: crowdedPositioning }
+      0.55,
+      0.65,
+      `Positioning active. Funding: ${isFundingAvail && fundingRate !== null ? (fundingRate * 100).toFixed(4) + '%' : 'N/A'}. Crowd: ${crowdedPositioning}.`,
+      evidence,
+      [],
+      {
+        fundingRate: isFundingAvail && fundingRate !== null ? (fundingRate * 100).toFixed(4) + '%' : 'UNAVAILABLE',
+        crowded: crowdedPositioning,
+      },
+      'LIVE'
     );
   }
 

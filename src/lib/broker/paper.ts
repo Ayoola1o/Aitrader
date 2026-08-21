@@ -4,6 +4,7 @@ import { SymbolId, Order, Position, TradeHistoryItem, PortfolioState } from '@/t
 import { dbPersistence } from '@/lib/db/schema';
 import { supabaseManager } from '@/lib/db/supabase';
 import { paperExecutionEngine } from './PaperExecutionEngine';
+import { paperLedgerService } from './PaperLedgerService';
 
 export class PaperBroker {
   private balance: number;
@@ -220,6 +221,35 @@ export class PaperBroker {
     this.positions.set(posId, newPos);
     this.saveToStorage();
 
+    // Persist to Authoritative Multi-Table Ledger (Item 8)
+    paperLedgerService.recordOrder({
+      order_id: orderId,
+      account_id: 'paper-primary-ledger',
+      symbol,
+      side,
+      type: 'MARKET',
+      price: fill.fillPrice,
+      size: fill.filledSize,
+      status: 'FILLED',
+      stop_loss: stopLoss,
+      take_profit: takeProfit,
+      decision_id: decisionId,
+      created_at: new Date().toISOString(),
+    });
+    paperLedgerService.recordFill({
+      fill_id: `FIL-${Date.now()}`,
+      order_id: orderId,
+      account_id: 'paper-primary-ledger',
+      symbol,
+      side,
+      fill_price: fill.fillPrice,
+      filled_size: fill.filledSize,
+      fee: fill.fee,
+      slippage: fill.slippageDollars,
+      timestamp: fill.timestamp,
+    });
+    paperLedgerService.syncPositions(Array.from(this.positions.values()));
+
     return {
       success: true,
       message: `Filled ${side} ${fill.filledSize} ${symbol} @ $${fill.fillPrice.toLocaleString()} (Fee: $${fill.fee.toFixed(2)})`,
@@ -268,6 +298,10 @@ export class PaperBroker {
     this.positions.delete(posId);
     this.tradeHistory.unshift(tradeItem);
     this.saveToStorage();
+
+    // Persist to Authoritative Ledger (Item 8)
+    paperLedgerService.recordTrade(tradeItem);
+    paperLedgerService.syncPositions(Array.from(this.positions.values()));
 
     if (pos.decisionId) {
       dbPersistence.updateDecisionOutcome(pos.decisionId, tradeItem);

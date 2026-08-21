@@ -43,7 +43,7 @@ export const DataLabTelemetryView: React.FC<DataLabTelemetryViewProps> = ({ snap
   // Live telemetry pulse from actual incoming snapshot
   useEffect(() => {
     if (snapshot && snapshot.price > 0) {
-      const activeLatency = healthSummary.services.marketData?.latencyMs || 42;
+      const activeLatency = healthSummary.services.marketData?.latencyMs || 0;
       const newLog = {
         id: Date.now(),
         time: Date.now(),

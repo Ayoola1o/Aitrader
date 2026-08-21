@@ -63,51 +63,38 @@ export const BacktestingView: React.FC<BacktestingViewProps> = ({ snapshot }) =>
   const [isRunning, setIsRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentStep, setCurrentStep] = useState('');
+  const [simResult, setSimResult] = useState<any | null>(null);
 
-  // ── Overview Performance Metrics (Matching backtest page.png) ───────────────
-  const totalReturnPercent = 28.45;
-  const netProfitDollars = 28452.31;
-  const cagr = 24.31;
-  const sharpeRatio = 2.14;
-  const sortinoRatio = 3.42;
-  const maxDrawdown = -7.21;
-  const winRate = 62.38;
-  const profitFactor = 2.38;
-  const expectancy = '0.87R';
-  const totalTradesCount = 186;
-  const winningTradesCount = 116;
-  const losingTradesCount = 70;
-  const avgHoldTime = '13h 42m';
+  // ── Overview Performance Metrics (Real Dynamic Backtest Results - Item 16) ─
+  const totalReturnPercent = simResult ? simResult.totalReturnPercent : 0;
+  const netProfitDollars = simResult ? simResult.netProfitDollars : 0;
+  const cagr = simResult ? simResult.cagr : 0;
+  const sharpeRatio = simResult ? simResult.sharpeRatio : 0;
+  const sortinoRatio = simResult ? simResult.sortinoRatio : 0;
+  const maxDrawdown = simResult ? simResult.maxDrawdown : 0;
+  const winRate = simResult ? simResult.winRate : 0;
+  const profitFactor = simResult ? simResult.profitFactor : 0;
+  const expectancy = simResult ? simResult.expectancy : '0.00R';
+  const totalTradesCount = simResult ? simResult.totalTradesCount : 0;
+  const winningTradesCount = simResult ? simResult.winningTradesCount : 0;
+  const losingTradesCount = simResult ? simResult.losingTradesCount : 0;
+  const avgHoldTime = simResult ? simResult.avgHoldTime : '0h';
 
   // ── Equity & Drawdown Curve Data ─────────────────────────────────────────────
   const equityPoints = useMemo(() => {
-    return [
-      { date: 'Jan 24', strategy: 100000, buyHold: 100000, dd: 0 },
-      { date: 'Feb 24', strategy: 104200, buyHold: 102500, dd: -1.2 },
-      { date: 'Mar 24', strategy: 108900, buyHold: 106800, dd: -0.8 },
-      { date: 'Apr 24', strategy: 107600, buyHold: 101200, dd: -3.4 },
-      { date: 'May 24', strategy: 111400, buyHold: 104500, dd: -1.5 },
-      { date: 'Jun 24', strategy: 116800, buyHold: 108200, dd: -2.1 },
-      { date: 'Jul 24', strategy: 115200, buyHold: 106000, dd: -4.8 },
-      { date: 'Aug 24', strategy: 119500, buyHold: 109400, dd: -1.8 },
-      { date: 'Sep 24', strategy: 122100, buyHold: 107800, dd: -2.9 },
-      { date: 'Oct 24', strategy: 120400, buyHold: 105200, dd: -7.21 },
-      { date: 'Nov 24', strategy: 124800, buyHold: 109100, dd: -1.4 },
-      { date: 'Dec 24', strategy: 126900, buyHold: 111400, dd: -0.9 },
-      { date: 'Jan 25', strategy: 125100, buyHold: 108900, dd: -3.1 },
-      { date: 'Feb 25', strategy: 128452.31, buyHold: 112374.21, dd: -1.1 },
-    ];
-  }, []);
+    if (simResult && Array.isArray(simResult.equityCurve) && simResult.equityCurve.length > 0) {
+      return simResult.equityCurve;
+    }
+    return [];
+  }, [simResult]);
 
   // ── Trades List Data ─────────────────────────────────────────────────────────
-  const tradesData = [
-    { time: '2025-05-24 09:00', dir: 'LONG', entry: 64250.10, exit: 65812.40, size: '0.023 BTC', pnlUsd: '+$1,562.30', pnlR: '+2.31R', duration: '12h 15m', reason: 'Take Profit', isWin: true },
-    { time: '2025-05-23 21:00', dir: 'SHORT', entry: 67120.50, exit: 66210.20, size: '0.018 BTC', pnlUsd: '+$910.30', pnlR: '+1.62R', duration: '8h 05m', reason: 'Take Profit', isWin: true },
-    { time: '2025-05-23 13:00', dir: 'LONG', entry: 64880.30, exit: 63950.10, size: '0.021 BTC', pnlUsd: '-$930.20', pnlR: '-1.05R', duration: '6h 42m', reason: 'Stop Loss', isWin: false },
-    { time: '2025-05-23 02:00', dir: 'LONG', entry: 63210.40, exit: 64820.70, size: '0.020 BTC', pnlUsd: '+$1,610.30', pnlR: '+2.12R', duration: '20h 35m', reason: 'Take Profit', isWin: true },
-    { time: '2025-05-22 15:00', dir: 'SHORT', entry: 66130.00, exit: 65210.00, size: '0.017 BTC', pnlUsd: '+$919.80', pnlR: '+1.41R', duration: '10h 12m', reason: 'Take Profit', isWin: true },
-    { time: '2025-05-22 04:00', dir: 'LONG', entry: 61980.20, exit: 61350.10, size: '0.019 BTC', pnlUsd: '-$630.10', pnlR: '-0.83R', duration: '7h 18m', reason: 'Stop Loss', isWin: false },
-  ];
+  const tradesData = useMemo(() => {
+    if (simResult && Array.isArray(simResult.trades)) {
+      return simResult.trades;
+    }
+    return [];
+  }, [simResult]);
 
   // ── Monthly Returns Matrix Data ─────────────────────────────────────────────
   const monthlyMatrix = [
@@ -127,47 +114,36 @@ export const BacktestingView: React.FC<BacktestingViewProps> = ({ snapshot }) =>
   ];
 
   // Handle Interactive Backtest Execution (Deterministic - Real Simulation Pipeline)
-  const handleRunSimulation = () => {
+  const handleRunSimulation = async () => {
     setIsRunning(true);
-    setProgress(0);
+    setProgress(20);
+    setCurrentStep('Ingesting historical OHLCV data from exchange...');
 
-    const steps = [
-      'Ingesting historical tick & order book data from Binance Futures...',
-      'Computing multi-timeframe EMA, RSI, VWAP & Volatility features...',
-      'Evaluating 8 specialist agents & multi-agent consensus fusion...',
-      'Simulating deterministic risk engine & position sizing gates...',
-      'Simulating market fills with 0.05% fees & realistic slippage...',
-      'Synthesizing Monte Carlo variance & Sharpe optimization metrics...',
-      'Finalizing backtesting performance report...',
-    ];
+    try {
+      const output = await realBacktestingEngine.runSimulation({
+        symbol: selectedAsset as SymbolId,
+        strategyName: strategyVersion,
+        startDate,
+        endDate,
+        initialCapital: Number(initialCapital.replace(/,/g, '')) || 100000,
+        feeRate: Number(feeRate) || 0.05,
+        slippageModel,
+        riskPerTrade: Number(riskPerTrade) || 0.5,
+        takeProfitR: Number(takeProfitR) || 2.5,
+        stopLossR: Number(stopLossR) || 1.0,
+        leverage: Number(leverage.replace('x', '')) || 1,
+      });
 
-    let currentIdx = 0;
-    const interval = setInterval(() => {
-      currentIdx++;
-      if (currentIdx < steps.length) {
-        setCurrentStep(steps[currentIdx]);
-        setProgress(Math.round(((currentIdx + 1) / steps.length) * 100));
-      } else {
-        clearInterval(interval);
-        // Execute Real Simulation Engine
-        realBacktestingEngine.runSimulation({
-          symbol: selectedAsset as SymbolId,
-          strategyName: strategyVersion,
-          startDate,
-          endDate,
-          initialCapital: Number(initialCapital.replace(/,/g, '')) || 100000,
-          feeRate: Number(feeRate) || 0.05,
-          slippageModel,
-          riskPerTrade: Number(riskPerTrade) || 0.5,
-          takeProfitR: Number(takeProfitR) || 2.5,
-          stopLossR: Number(stopLossR) || 1.0,
-          leverage: Number(leverage.replace('x', '')) || 1,
-        });
-
-        setIsRunning(false);
-        setActiveSection('overview');
-      }
-    }, 400);
+      setSimResult(output);
+      setProgress(100);
+      setCurrentStep(output.message);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setCurrentStep(`Simulation error: ${msg}`);
+    } finally {
+      setIsRunning(false);
+      setActiveSection('overview');
+    }
   };
 
   // Handle Export Report JSON/CSV
@@ -582,7 +558,7 @@ export const BacktestingView: React.FC<BacktestingViewProps> = ({ snapshot }) =>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-800/40">
-                          {tradesData.map((t, idx) => (
+                          {tradesData.map((t: any, idx: number) => (
                             <tr key={idx} className="hover:bg-gray-800/20">
                               <td className="py-2.5 text-gray-400 text-[11px]">{t.time}</td>
                               <td className={`py-2.5 font-bold ${t.dir === 'LONG' ? 'text-emerald-400' : 'text-rose-400'}`}>

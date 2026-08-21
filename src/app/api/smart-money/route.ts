@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { checkRateLimit, rateLimitResponse } from '@/lib/server/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +31,9 @@ export interface SmartMoneyAssetReport {
 }
 
 export async function GET(req: NextRequest) {
+  const rate = checkRateLimit(req, { limit: 60, windowMs: 60000 });
+  if (!rate.allowed) return rateLimitResponse(rate.retryAfter);
+
   try {
     const searchParams = req.nextUrl.searchParams;
     const requestedSymbol = searchParams.get('symbol') || 'BTCUSDT';

@@ -11,6 +11,8 @@ import { alpacaBrokerClient, buildPortfolioFromAlpaca } from '@/lib/broker/alpac
 import { paperBroker } from '@/lib/broker/paper';
 import { telegramService } from '@/lib/notifications/telegram';
 import { botRuntime } from '@/lib/bot/BotRuntime';
+import { verifyCronAuth, authenticateRequest, unauthorizedResponse } from '@/lib/server/auth';
+import { checkRateLimit, rateLimitResponse } from '@/lib/server/rateLimit';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Allow full 60s for Vercel serverless functions
@@ -168,6 +170,19 @@ export async function POST(req: NextRequest) {
 }
 
 async function handleCronCycle(req: NextRequest) {
+  // 1. Rate Limiting Check
+  const rate = checkRateLimit(req, { limit: 120, windowMs: 60000 });
+  if (!rate.allowed) return rateLimitResponse(rate.retryAfter);
+
+  // 2. Cron Authentication Gate (CRON_SECRET or authenticated user)
+  const isCronAuthorized = verifyCronAuth(req);
+  if (!isCronAuthorized) {
+    const auth = await authenticateRequest(req);
+    if (!auth.authenticated) {
+      return unauthorizedResponse('Unauthorized: Valid CRON_SECRET or Bearer token required to trigger bot cron execution.');
+    }
+  }
+
   try {
     // 1. Check for running bot session from Supabase (or /api/bot/state)
     const activeSession = await supabaseManager.getActiveBotSession();

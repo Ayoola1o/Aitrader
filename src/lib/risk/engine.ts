@@ -5,6 +5,9 @@ interface RiskConfig {
   maxDailyDrawdownPercent: number;
   minRiskReward: number;
   maxSpreadPercent: number;
+  maxFreshnessSeconds: number;
+  minLiquidityScore: number;
+  maxSlippagePercent: number;
   newsKillSwitch: boolean;
   minConfidence: number; // 0-1
 }
@@ -14,6 +17,9 @@ const DEFAULT_RISK: RiskConfig = {
   maxDailyDrawdownPercent: 5.0,
   minRiskReward: 2.0,
   maxSpreadPercent: 0.3, // 0.3% max spread
+  maxFreshnessSeconds: 15, // max 15s data age
+  minLiquidityScore: 0.30,
+  maxSlippagePercent: 0.5,
   newsKillSwitch: false,
   minConfidence: 0.68,
 };
@@ -25,6 +31,9 @@ export class DeterministicRiskEngine {
     this.config = { ...this.config, ...config };
   }
 
+  /**
+   * Deterministic 10-Gate Risk Evaluation & Comprehensive Data Quality Gate (Item 19)
+   */
   evaluate(
     decision: LLMDecision,
     portfolio: PortfolioState,
@@ -33,46 +42,74 @@ export class DeterministicRiskEngine {
   ): RiskCheckResult {
     const failedGates: string[] = [];
     const warnings: string[] = [];
+    const isLiveOrPaper = snapshot.appMode === 'PAPER' || snapshot.appMode === 'LIVE';
 
-    // Gate 1: Data quality — fail-closed on stale data in PAPER mode
-    const dataQualityBlock = snapshot.dataQuality.criticalStale && snapshot.appMode === 'PAPER';
-    if (dataQualityBlock) {
-      failedGates.push('DATA_QUALITY: Critical market data is stale — NO_TRADE');
+    // ── Gate 1: Comprehensive Data Quality Verification (Item 19) ────────────────
+    let dataQualityBlock = false;
+    const dq = snapshot.dataQuality;
+
+    if (isLiveOrPaper) {
+      if (dq.criticalStale || dq.tickerStatus === 'UNAVAILABLE' || snapshot.price <= 0) {
+        failedGates.push('DATA_QUALITY_TICKER: Live price ticker feed is UNAVAILABLE or stale — NO_TRADE');
+        dataQualityBlock = true;
+      }
+      if (dq.orderBookStatus === 'UNAVAILABLE' || !snapshot.orderBook || snapshot.orderBook.bids.length === 0) {
+        failedGates.push('DATA_QUALITY_ORDERBOOK: L2 Depth order book feed is UNAVAILABLE — NO_TRADE');
+        dataQualityBlock = true;
+      }
+      if (dq.candlesStatus === 'UNAVAILABLE' || !snapshot.candles || snapshot.candles.length < 5) {
+        failedGates.push('DATA_QUALITY_CANDLES: Candlestick history feed is UNAVAILABLE — NO_TRADE');
+        dataQualityBlock = true;
+      }
+      if (snapshot.timestamp > 0) {
+        const dataAgeSeconds = Math.max(0, Math.round((Date.now() - snapshot.timestamp) / 1000));
+        if (dataAgeSeconds > this.config.maxFreshnessSeconds) {
+          failedGates.push(`DATA_QUALITY_FRESHNESS: Data age (${dataAgeSeconds}s) exceeds ${this.config.maxFreshnessSeconds}s freshness threshold`);
+          dataQualityBlock = true;
+        }
+      }
+      if (features.liquidityScore < this.config.minLiquidityScore) {
+        failedGates.push(`DATA_QUALITY_LIQUIDITY: Market liquidity score (${features.liquidityScore.toFixed(2)}) is insufficient for institutional execution`);
+      }
+      if (features.slippageRisk === 'HIGH') {
+        failedGates.push('DATA_QUALITY_SLIPPAGE: High slippage risk / thin depth crossing threshold — NO_TRADE');
+      }
     }
 
-    // Gate 2: Daily drawdown limit
-    const dailyDrawdown = portfolio.dailyDrawdownPercent;
+    // ── Gate 2: Daily drawdown limit ─────────────────────────────────────────────
+    const dailyDrawdown = portfolio.dailyDrawdownPercent || 0;
     if (dailyDrawdown >= this.config.maxDailyDrawdownPercent) {
       failedGates.push(`DAILY_DRAWDOWN: ${dailyDrawdown.toFixed(2)}% >= limit ${this.config.maxDailyDrawdownPercent}%`);
     }
 
-    // Gate 3: Total drawdown
-    if (portfolio.maxDrawdownPercent >= this.config.maxDailyDrawdownPercent * 2) {
-      failedGates.push(`MAX_DRAWDOWN: ${portfolio.maxDrawdownPercent.toFixed(2)}% exceeded`);
+    // ── Gate 3: Total drawdown ───────────────────────────────────────────────────
+    const maxDrawdown = portfolio.maxDrawdownPercent || 0;
+    if (maxDrawdown >= this.config.maxDailyDrawdownPercent * 2) {
+      failedGates.push(`MAX_DRAWDOWN: ${maxDrawdown.toFixed(2)}% exceeded`);
     }
 
-    // Gate 4: Spread too wide
+    // ── Gate 4: Spread too wide ──────────────────────────────────────────────────
     if (features.spreadPercent * 100 > this.config.maxSpreadPercent) {
       failedGates.push(`SPREAD: ${(features.spreadPercent * 100).toFixed(4)}% > max ${this.config.maxSpreadPercent}%`);
     }
 
-    // Gate 5: Minimum R:R
+    // ── Gate 5: Minimum R:R ──────────────────────────────────────────────────────
     const rr = decision.riskReward ?? 0;
     if (decision.action !== 'NO_TRADE' && decision.action !== 'HOLD' && rr < this.config.minRiskReward && decision.stopLoss !== null) {
       failedGates.push(`RISK_REWARD: ${rr.toFixed(2)} < minimum ${this.config.minRiskReward}`);
     }
 
-    // Gate 6: Stop loss required
+    // ── Gate 6: Stop loss required ───────────────────────────────────────────────
     if ((decision.action === 'BUY' || decision.action === 'SELL') && decision.stopLoss === null) {
-      failedGates.push('NO_STOP_LOSS: Trade requires a stop loss');
+      failedGates.push('NO_STOP_LOSS: Trade requires a verified stop loss');
     }
 
-    // Gate 7: News kill switch — blocks new entries when active
+    // ── Gate 7: News kill switch ─────────────────────────────────────────────────
     if (this.config.newsKillSwitch && (decision.action === 'BUY' || decision.action === 'SELL')) {
       failedGates.push('NEWS_KILL_SWITCH: Trading paused for macro event window');
     }
 
-    // Gate 7b: Minimum AI confidence
+    // ── Gate 7b: Minimum AI confidence ───────────────────────────────────────────
     if (
       (decision.action === 'BUY' || decision.action === 'SELL') &&
       decision.confidence < this.config.minConfidence
@@ -82,7 +119,7 @@ export class DeterministicRiskEngine {
       );
     }
 
-    // Risk-based position sizing
+    // ── Gate 8: Margin and Free Equity Availability ──────────────────────────────
     const price = snapshot.price;
     const stopLoss = decision.stopLoss;
     const equity = portfolio.equity;
@@ -96,16 +133,11 @@ export class DeterministicRiskEngine {
       maxAllowedPositionSize = calculatedPositionSize;
     }
 
-    // Gate 8: Minimum viable size
     if (calculatedPositionSize > 0 && price > 0) {
       const positionValue = calculatedPositionSize * price;
-      if (positionValue > portfolio.freeMargin) {
+      if (portfolio.freeMargin > 0 && positionValue > portfolio.freeMargin) {
         failedGates.push(`MARGIN: Position value $${positionValue.toFixed(2)} exceeds free margin $${portfolio.freeMargin.toFixed(2)}`);
       }
-    }
-
-    if (features.slippageRisk === 'HIGH') {
-      warnings.push('HIGH_SLIPPAGE: Execution cost may erode expected edge');
     }
 
     return {
@@ -119,10 +151,6 @@ export class DeterministicRiskEngine {
       newsKillSwitchActive: this.config.newsKillSwitch,
       dataQualityBlock,
     };
-  }
-
-  getConfig(): RiskConfig {
-    return { ...this.config };
   }
 }
 

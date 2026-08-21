@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { authenticateRequest, unauthorizedResponse } from '@/lib/server/auth';
+import { checkRateLimit, rateLimitResponse } from '@/lib/server/rateLimit';
+import { auditLogger } from '@/lib/server/audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,14 +11,10 @@ interface AlpacaApiCredentials {
   isPaper: boolean;
 }
 
-function resolveCredentials(req: NextRequest): AlpacaApiCredentials {
-  const headerKey = req.headers.get('x-alpaca-key');
-  const headerSecret = req.headers.get('x-alpaca-secret');
-  const headerPaper = req.headers.get('x-alpaca-paper');
-
-  const key = headerKey || process.env.ALPACA_API_KEY || process.env.NEXT_PUBLIC_ALPACA_API_KEY || '';
-  const secret = headerSecret || process.env.ALPACA_SECRET_KEY || process.env.NEXT_PUBLIC_ALPACA_SECRET_KEY || '';
-  const isPaper = headerPaper !== null ? headerPaper === 'true' : (process.env.NEXT_PUBLIC_ALPACA_PAPER !== 'false');
+function resolveServerCredentials(isPaperRequested?: boolean): AlpacaApiCredentials {
+  const key = process.env.ALPACA_API_KEY || '';
+  const secret = process.env.ALPACA_SECRET_KEY || '';
+  const isPaper = isPaperRequested !== undefined ? isPaperRequested : (process.env.ALPACA_PAPER !== 'false');
 
   return { key, secret, isPaper };
 }
@@ -34,17 +33,40 @@ function getAlpacaHeaders(creds: AlpacaApiCredentials): Record<string, string> {
 }
 
 /**
- * Alpaca Proxy Handler:
+ * Sanitize error message to prevent any credential reflection
+ */
+function sanitizeErrorMessage(msg: string): string {
+  return msg.replace(/[A-Za-z0-9_-]{20,}/g, '••••');
+}
+
+/**
+ * Alpaca Proxy Handler (Phase 1 Security Hardened):
  * Supports GET: account, positions, orders, activities
  * Supports POST: placeOrder, cancelOrder, closePosition, closeAllPositions
  */
 export async function GET(req: NextRequest) {
-  const creds = resolveCredentials(req);
-  if (!creds.key || !creds.secret) {
-    return NextResponse.json({ success: false, error: 'Alpaca credentials missing' }, { status: 400 });
+  // 1. Rate Limiting Check
+  const rate = checkRateLimit(req, { limit: 60, windowMs: 60000 });
+  if (!rate.allowed) return rateLimitResponse(rate.retryAfter);
+
+  // 2. Centralized Authentication Check
+  const auth = await authenticateRequest(req);
+  if (!auth.authenticated || !auth.user) {
+    return unauthorizedResponse('Authentication required to access private broker data.');
   }
 
+  // 3. Resolve Server Credentials (Never trust client-supplied secret keys)
   const { searchParams } = new URL(req.url);
+  const requestedPaper = searchParams.get('paper') !== 'false';
+  const creds = resolveServerCredentials(requestedPaper);
+
+  if (!creds.key || !creds.secret) {
+    return NextResponse.json(
+      { success: false, error: 'Alpaca credentials are not configured on server' },
+      { status: 503 }
+    );
+  }
+
   const action = searchParams.get('action') || 'account';
   const baseUrl = getAlpacaBaseUrl(creds.isPaper);
   const headers = getAlpacaHeaders(creds);
@@ -54,7 +76,7 @@ export async function GET(req: NextRequest) {
       const res = await fetch(`${baseUrl}/account`, { headers, cache: 'no-store' });
       if (!res.ok) {
         const errorText = await res.text();
-        return NextResponse.json({ success: false, error: `Alpaca account error: ${res.status} ${errorText}` }, { status: res.status });
+        return NextResponse.json({ success: false, error: `Alpaca account query failed (${res.status}): ${sanitizeErrorMessage(errorText)}` }, { status: res.status });
       }
       const data = await res.json();
       return NextResponse.json({ success: true, data });
@@ -64,7 +86,7 @@ export async function GET(req: NextRequest) {
       const res = await fetch(`${baseUrl}/positions`, { headers, cache: 'no-store' });
       if (!res.ok) {
         const errorText = await res.text();
-        return NextResponse.json({ success: false, error: `Alpaca positions error: ${res.status} ${errorText}` }, { status: res.status });
+        return NextResponse.json({ success: false, error: `Alpaca positions query failed: ${sanitizeErrorMessage(errorText)}` }, { status: res.status });
       }
       const data = await res.json();
       return NextResponse.json({ success: true, data: Array.isArray(data) ? data : [] });
@@ -76,7 +98,7 @@ export async function GET(req: NextRequest) {
       const res = await fetch(`${baseUrl}/orders?status=${status}&limit=${limit}&nested=true`, { headers, cache: 'no-store' });
       if (!res.ok) {
         const errorText = await res.text();
-        return NextResponse.json({ success: false, error: `Alpaca orders error: ${res.status} ${errorText}` }, { status: res.status });
+        return NextResponse.json({ success: false, error: `Alpaca orders query failed: ${sanitizeErrorMessage(errorText)}` }, { status: res.status });
       }
       const data = await res.json();
       return NextResponse.json({ success: true, data: Array.isArray(data) ? data : [] });
@@ -88,7 +110,7 @@ export async function GET(req: NextRequest) {
       const res = await fetch(`${baseUrl}/account/activities/${activityType}?direction=desc&page_size=${pageSize}`, { headers, cache: 'no-store' });
       if (!res.ok) {
         const errorText = await res.text();
-        return NextResponse.json({ success: false, error: `Alpaca activities error: ${res.status} ${errorText}` }, { status: res.status });
+        return NextResponse.json({ success: false, error: `Alpaca activities query failed: ${sanitizeErrorMessage(errorText)}` }, { status: res.status });
       }
       const data = await res.json();
       return NextResponse.json({ success: true, data: Array.isArray(data) ? data : [] });
@@ -97,14 +119,28 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, error: `Unknown action: ${action}` }, { status: 400 });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ success: false, error: `Alpaca request failed: ${message}` }, { status: 500 });
+    return NextResponse.json({ success: false, error: `Alpaca request failed: ${sanitizeErrorMessage(message)}` }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
-  const creds = resolveCredentials(req);
+  // 1. Rate Limiting Check (Strict 30 req/min for order actions)
+  const rate = checkRateLimit(req, { limit: 30, windowMs: 60000 });
+  if (!rate.allowed) return rateLimitResponse(rate.retryAfter);
+
+  // 2. Centralized Authentication Check
+  const auth = await authenticateRequest(req);
+  if (!auth.authenticated || !auth.user) {
+    return unauthorizedResponse('Authentication required to execute broker transactions.');
+  }
+
+  // 3. Resolve Server Credentials
+  const creds = resolveServerCredentials();
   if (!creds.key || !creds.secret) {
-    return NextResponse.json({ success: false, error: 'Alpaca credentials missing' }, { status: 400 });
+    return NextResponse.json(
+      { success: false, error: 'Alpaca credentials are not configured on server' },
+      { status: 503 }
+    );
   }
 
   const baseUrl = getAlpacaBaseUrl(creds.isPaper);
@@ -146,13 +182,11 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Convert symbol for Alpaca Crypto if needed (e.g. BTCUSDT -> BTC/USD)
       let formattedSymbol = symbol;
       if (!formattedSymbol.includes('/')) {
         formattedSymbol = formattedSymbol.replace('USDT', '/USD').replace('USD', '/USD');
       }
 
-      // Crypto orders on Alpaca require time_in_force 'gtc' or 'ioc'
       const isCrypto = formattedSymbol.includes('/') || formattedSymbol.includes('USD');
       const tif = isCrypto ? 'gtc' : (time_in_force || 'gtc');
 
@@ -208,10 +242,23 @@ export async function POST(req: NextRequest) {
 
       if (!res.ok) {
         const errorText = await res.text();
-        return NextResponse.json({ success: false, error: `Alpaca order rejected: ${res.status} ${errorText}` }, { status: res.status });
+        await auditLogger.log({
+          userId: auth.user.id,
+          eventType: 'ORDER_PLACED',
+          details: { symbol: formattedSymbol, side, qty, notional, error: sanitizeErrorMessage(errorText) },
+          status: 'FAILURE',
+        });
+        return NextResponse.json({ success: false, error: `Alpaca order rejected: ${sanitizeErrorMessage(errorText)}` }, { status: res.status });
       }
 
       const data = await res.json();
+      await auditLogger.log({
+        userId: auth.user.id,
+        eventType: 'ORDER_PLACED',
+        details: { orderId: data.id, symbol: formattedSymbol, side, qty: data.qty, notional: data.notional },
+        status: 'SUCCESS',
+      });
+
       return NextResponse.json({ success: true, data });
     }
 
@@ -228,8 +275,15 @@ export async function POST(req: NextRequest) {
 
       if (!res.ok) {
         const errorText = await res.text();
-        return NextResponse.json({ success: false, error: `Alpaca cancel failed: ${res.status} ${errorText}` }, { status: res.status });
+        return NextResponse.json({ success: false, error: `Alpaca cancel failed: ${sanitizeErrorMessage(errorText)}` }, { status: res.status });
       }
+
+      await auditLogger.log({
+        userId: auth.user.id,
+        eventType: 'ORDER_CANCELLED',
+        details: { orderId },
+        status: 'SUCCESS',
+      });
 
       return NextResponse.json({ success: true, message: `Order ${orderId} cancelled` });
     }
@@ -253,10 +307,17 @@ export async function POST(req: NextRequest) {
 
       if (!res.ok) {
         const errorText = await res.text();
-        return NextResponse.json({ success: false, error: `Alpaca close position failed: ${res.status} ${errorText}` }, { status: res.status });
+        return NextResponse.json({ success: false, error: `Alpaca close position failed: ${sanitizeErrorMessage(errorText)}` }, { status: res.status });
       }
 
       const data = await res.json();
+      await auditLogger.log({
+        userId: auth.user.id,
+        eventType: 'POSITION_CLOSED',
+        details: { symbol: formattedSymbol },
+        status: 'SUCCESS',
+      });
+
       return NextResponse.json({ success: true, data });
     }
 
@@ -268,16 +329,23 @@ export async function POST(req: NextRequest) {
 
       if (!res.ok) {
         const errorText = await res.text();
-        return NextResponse.json({ success: false, error: `Alpaca close all failed: ${res.status} ${errorText}` }, { status: res.status });
+        return NextResponse.json({ success: false, error: `Alpaca close all failed: ${sanitizeErrorMessage(errorText)}` }, { status: res.status });
       }
 
       const data = await res.json();
+      await auditLogger.log({
+        userId: auth.user.id,
+        eventType: 'CLOSE_ALL_POSITIONS',
+        details: { count: Array.isArray(data) ? data.length : 0 },
+        status: 'SUCCESS',
+      });
+
       return NextResponse.json({ success: true, data });
     }
 
     return NextResponse.json({ success: false, error: `Unknown action: ${action}` }, { status: 400 });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ success: false, error: `Alpaca execution failed: ${message}` }, { status: 500 });
+    return NextResponse.json({ success: false, error: `Alpaca execution failed: ${sanitizeErrorMessage(message)}` }, { status: 500 });
   }
 }

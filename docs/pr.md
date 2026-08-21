@@ -1,0 +1,1 @@
+Do not move to the next phase. Stop and give me the implementation report, files changed, tests performed, errors remaining, and anything that requires my decision.
