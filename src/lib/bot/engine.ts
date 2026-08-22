@@ -56,6 +56,8 @@ export interface BotConfig {
   maxConsecutiveNoTrades: number; // 3 | 5 | 10
   maxConsecutiveLosses: number;  // 2 | 3 | 5
   autoConfirmExit: boolean;
+  mode?: 'PAPER' | 'LIVE';
+  liveTradingEnabled?: boolean;
 }
 
 const DEFAULT_CONFIG: BotConfig = {
@@ -229,7 +231,8 @@ export class TradingBotEngine {
         symbol: sym,
         allocatedCapital: this.config.allocatedCapital,
         riskPercent: 0.5,
-        mode: 'PAPER',
+        mode: this.config.mode ?? 'PAPER',
+        liveTradingEnabled: this.config.liveTradingEnabled ?? false,
       });
 
       if (runtimeResult.halted) {

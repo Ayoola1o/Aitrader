@@ -14,29 +14,6 @@ interface EquityCurveChartProps {
   initialEquity?: number;
 }
 
-const DEFAULT_DATA: EquityDataPoint[] = [
-  { date: 'May 18', timestamp: 1, equity: 84200, benchmark: 82000 },
-  { date: 'May 18', timestamp: 2, equity: 89100, benchmark: 84500 },
-  { date: 'May 18', timestamp: 3, equity: 86500, benchmark: 87000 },
-  { date: 'May 19', timestamp: 4, equity: 92400, benchmark: 89000 },
-  { date: 'May 19', timestamp: 5, equity: 95800, benchmark: 91200 },
-  { date: 'May 19', timestamp: 6, equity: 93200, benchmark: 94000 },
-  { date: 'May 20', timestamp: 7, equity: 99400, benchmark: 96500 },
-  { date: 'May 20', timestamp: 8, equity: 104200, benchmark: 98000 },
-  { date: 'May 20', timestamp: 9, equity: 101800, benchmark: 102000 },
-  { date: 'May 21', timestamp: 10, equity: 108900, benchmark: 100500 },
-  { date: 'May 21', timestamp: 11, equity: 114500, benchmark: 103000 },
-  { date: 'May 21', timestamp: 12, equity: 111200, benchmark: 107000 },
-  { date: 'May 22', timestamp: 13, equity: 116800, benchmark: 105500 },
-  { date: 'May 22', timestamp: 14, equity: 121400, benchmark: 109000 },
-  { date: 'May 22', timestamp: 15, equity: 118900, benchmark: 112000 },
-  { date: 'May 23', timestamp: 16, equity: 122300, benchmark: 110500 },
-  { date: 'May 23', timestamp: 17, equity: 126700, benchmark: 114000 },
-  { date: 'May 23', timestamp: 18, equity: 123900, benchmark: 117500 },
-  { date: 'May 24', timestamp: 19, equity: 124800, benchmark: 116000 },
-  { date: 'May 24', timestamp: 20, equity: 125340, benchmark: 118400 },
-];
-
 export const EquityCurveChart: React.FC<EquityCurveChartProps> = ({
   data,
   initialEquity = 100000,
@@ -46,18 +23,10 @@ export const EquityCurveChart: React.FC<EquityCurveChartProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   // Generate clean real baseline if no closed trades yet
+  const now = Date.now();
   const chartData: EquityDataPoint[] = data && data.length > 0
     ? data
-    : Array.from({ length: 7 }, (_, i) => {
-        const d = new Date(Date.now() - (6 - i) * 86400000);
-        const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        return {
-          date: dateStr,
-          timestamp: d.getTime(),
-          equity: initialEquity,
-          benchmark: initialEquity,
-        };
-      });
+    : [{ date: new Date(now).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), timestamp: now, equity: initialEquity, benchmark: initialEquity }];
 
   const height = 220;
   const paddingLeft = 60;

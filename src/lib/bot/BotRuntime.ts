@@ -110,7 +110,7 @@ export class BotRuntime {
       // ── 4. Portfolio Ledger Sync (Live Broker vs Paper Broker) ──────────────
       let portfolio: PortfolioState;
 
-      if (mode === 'LIVE' && alpacaBrokerClient.hasCredentials()) {
+      if ((mode === 'LIVE' || mode === 'PAPER') && alpacaBrokerClient.hasCredentials()) {
         try {
           const acc = await alpacaBrokerClient.getAccount();
           const equity = acc?.equity || allocatedCapital;
@@ -197,7 +197,7 @@ export class BotRuntime {
           };
         }
 
-        if (mode === 'LIVE' && alpacaBrokerClient.hasCredentials()) {
+        if ((mode === 'LIVE' || mode === 'PAPER') && alpacaBrokerClient.hasCredentials()) {
           try {
             const alpacaSide = dec.action === 'BUY' ? 'buy' : 'sell';
             const alpacaSym =

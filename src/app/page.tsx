@@ -105,7 +105,7 @@ export default function Home() {
     applySettings(loadSettings());
 
     if (alpacaKey && alpacaSecret) {
-      alpacaBrokerClient.setCredentials({ apiKeyId: alpacaKey, secretKey: alpacaSecret, isPaper: true });
+      alpacaBrokerClient.setCredentials({ apiKeyId: alpacaKey, secretKey: alpacaSecret, isPaper: savedMode !== 'LIVE' });
     }
 
     // Sync active cloud bot from Supabase if running
@@ -117,6 +117,11 @@ export default function Home() {
     marketEngine.setMode(appMode);
     if (typeof window !== 'undefined') {
       localStorage.setItem('aitrader_app_mode', appMode);
+      const alpacaKey = localStorage.getItem('aitrader_alpaca_api_key');
+      const alpacaSecret = localStorage.getItem('aitrader_alpaca_secret_key');
+      if (alpacaKey && alpacaSecret) {
+        alpacaBrokerClient.setCredentials({ apiKeyId: alpacaKey, secretKey: alpacaSecret, isPaper: appMode !== 'LIVE' });
+      }
     }
   }, [appMode]);
 
@@ -155,7 +160,7 @@ export default function Home() {
 
       const activeFeat = feat ?? featureEngine.calculateFeatures(currentSnap);
       const initialBalance = getStartingBalance();
-      let port: PortfolioState;
+      let port: PortfolioState | null = null;
 
       if (alpacaBrokerClient.hasCredentials()) {
         try {
@@ -171,12 +176,14 @@ export default function Home() {
           port = buildPortfolioFromAlpaca(acc, alpacaPositions, initialBalance, alpacaTrades);
           dbPersistence.syncPositions(alpacaPositions);
         } catch (alpacaErr) {
-          console.warn('Alpaca market sync error, fallback to paper broker:', alpacaErr);
-          paperBroker.updatePrices({ [sym]: currentSnap.price } as Record<SymbolId, number>);
-          port = paperBroker.getPortfolioState(currentSnap.price);
-          setPositions(paperBroker.getPositions());
-          setOrders(paperBroker.getOrders());
-          setTradeHistory(paperBroker.getTradeHistory());
+          console.warn('Alpaca market sync error:', alpacaErr);
+          setPositions([]);
+          setOrders([]);
+          setTradeHistory([]);
+          setPortfolio(null);
+          setRiskCheck(null);
+          showNotification(`Alpaca sync failed: ${alpacaErr instanceof Error ? alpacaErr.message : 'unavailable'}`);
+          return;
         }
       } else {
         paperBroker.updatePrices({ [sym]: currentSnap.price } as Record<SymbolId, number>);
@@ -349,7 +356,11 @@ export default function Home() {
 
   // Bot Handlers
   const handleSpawnBot = (config: BotConfig) => {
-    tradingBotEngine.start(config);
+    tradingBotEngine.start({
+      ...config,
+      mode: appMode === 'LIVE' ? 'LIVE' : 'PAPER',
+      liveTradingEnabled: appMode === 'LIVE',
+    });
     showNotification(`🤖 Bot spawned for ${config.symbol} (cycle every ${config.cycleIntervalSeconds}s)`);
   };
 
@@ -456,6 +467,8 @@ export default function Home() {
               decision={decision}
               riskCheck={riskCheck}
               portfolio={portfolio}
+              positions={positions}
+              tradeHistory={tradeHistory}
               appMode={appMode}
               onExecuteTrade={handleExecutePaperTrade}
               onNavigateSettings={() => setActiveTab('settings')}
@@ -498,7 +511,6 @@ export default function Home() {
               orders={orders}
               onClosePosition={handleClosePosition}
               onCancelOrder={handleCancelOrder}
-              onNavigateSettings={() => setActiveTab('settings')}
             />
           )}
 
@@ -520,6 +532,7 @@ export default function Home() {
               onNavigateDashboard={() => setActiveTab('dashboard')}
               onNavigateTerminal={() => setActiveTab('terminal')}
               onNavigateSettings={() => setActiveTab('settings')}
+              onSpawnBot={handleSpawnBot}
             />
           )}
 

@@ -31,84 +31,7 @@ export interface BotStateItem {
   log: Array<{ id: number; time: number; level: 'INFO' | 'ACTION' | 'WARN' | 'ERROR'; message: string }>;
 }
 
-// In-memory multi-bot registry with rich initial presets
-let inMemoryBots: BotStateItem[] = [
-  {
-    id: 'strat-1',
-    name: 'AI Quant Core v1.3',
-    symbol: 'BTCUSDT',
-    version: 'v1.3',
-    status: 'RUNNING',
-    allocatedCapital: 5000,
-    cycleIntervalSeconds: 30,
-    cycleCount: 1,
-    tradesExecuted: 0,
-    runningPnL: 0,
-    dailyPnL: 0,
-    totalReturn: 0,
-    winRate: '—',
-    lastAction: 'Monitoring order book & live feature calculations',
-    lastDecisionAction: 'HOLD',
-    consecutiveNoTrades: 0,
-    consecutiveLosses: 0,
-    currentPrice: 64250,
-    sparkline: [100, 100],
-    startedAt: Date.now() - 60000,
-    log: [
-      { id: 1, time: Date.now() - 30000, level: 'INFO', message: 'Bot initialized on BTCUSDT ($5,000.00 capital) · 24/7 Cloud Engine Active' },
-    ],
-  },
-  {
-    id: 'strat-2',
-    name: 'Momentum Sweep v1.0',
-    symbol: 'ETHUSDT',
-    version: 'v1.0',
-    status: 'RUNNING',
-    allocatedCapital: 3000,
-    cycleIntervalSeconds: 30,
-    cycleCount: 1,
-    tradesExecuted: 0,
-    runningPnL: 0,
-    dailyPnL: 0,
-    totalReturn: 0,
-    winRate: '—',
-    lastAction: 'Scanning EMA20 / VWAP cross and volume confirmation',
-    lastDecisionAction: 'HOLD',
-    consecutiveNoTrades: 0,
-    consecutiveLosses: 0,
-    currentPrice: 3450,
-    sparkline: [100, 100],
-    startedAt: Date.now() - 60000,
-    log: [
-      { id: 1, time: Date.now() - 30000, level: 'INFO', message: 'Bot initialized on ETHUSDT ($3,000.00 capital) · 24/7 Cloud Engine Active' },
-    ],
-  },
-  {
-    id: 'strat-3',
-    name: 'Liquidity Fade v2.0',
-    symbol: 'SOLUSDT',
-    version: 'v2.0',
-    status: 'PAUSED',
-    allocatedCapital: 2000,
-    cycleIntervalSeconds: 45,
-    cycleCount: 0,
-    tradesExecuted: 0,
-    runningPnL: 0,
-    dailyPnL: 0,
-    totalReturn: 0,
-    winRate: '—',
-    lastAction: 'Standby mode (Paused by user/risk gate)',
-    lastDecisionAction: 'NO_TRADE',
-    consecutiveNoTrades: 0,
-    consecutiveLosses: 0,
-    currentPrice: 145.2,
-    sparkline: [100, 100],
-    startedAt: Date.now() - 60000,
-    log: [
-      { id: 1, time: Date.now() - 30000, level: 'INFO', message: 'Bot configured on SOLUSDT ($2,000.00 capital) · Inactive/Paused' },
-    ],
-  },
-];
+let inMemoryBots: BotStateItem[] = [];
 
 export async function GET(req: NextRequest) {
   const rate = checkRateLimit(req, { limit: 120, windowMs: 60000 });
@@ -166,7 +89,7 @@ export async function POST(req: NextRequest) {
         consecutiveNoTrades: 0,
         consecutiveLosses: 0,
         currentPrice: 0,
-        sparkline: [100, 100],
+        sparkline: [],
         startedAt: Date.now(),
         log: [
           {

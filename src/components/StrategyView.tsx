@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Sparkline } from '@/components/dashboard/Sparkline';
-import { StrategySidebar, StrategyHubNavId, StrategyStatusFilter } from '@/components/strategy/StrategySidebar';
 import { StrategyInspector, StrategyItemData } from '@/components/strategy/StrategyInspector';
 import {
   Bot,
@@ -30,6 +29,7 @@ import { SymbolId, MarketSnapshot, PortfolioState, Position, TradeHistoryItem } 
 import { featureEngine } from '@/lib/features/engine';
 import { specialistAgentSystem } from '@/lib/agents/specialists';
 import { signalFusionEngine } from '@/lib/fusion/engine';
+import { BotConfig } from '@/lib/bot/engine';
 
 export interface StrategyViewProps {
   snapshot?: MarketSnapshot;
@@ -41,6 +41,7 @@ export interface StrategyViewProps {
   onNavigateDashboard?: () => void;
   onNavigateTerminal?: () => void;
   onNavigateSettings?: () => void;
+  onSpawnBot?: (config: BotConfig) => void;
 }
 
 export interface BotStrategyItem extends StrategyItemData {
@@ -63,9 +64,10 @@ export const StrategyView: React.FC<StrategyViewProps> = ({
   onNavigateDashboard,
   onNavigateTerminal,
   onNavigateSettings,
+  onSpawnBot,
 }) => {
-  const [activeSection, setActiveSection] = useState<StrategyHubNavId>('overview');
-  const [statusFilter, setStatusFilter] = useState<StrategyStatusFilter>('ALL');
+  const [activeSection, setActiveSection] = useState<'overview' | 'marketplace' | 'portfolio' | 'reports' | 'research'>('overview');
+  const statusFilter: string = 'ALL';
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStrategyId, setSelectedStrategyId] = useState<string>('strat-1');
   const [isSyncing, setIsSyncing] = useState(false);
@@ -282,14 +284,14 @@ agentWeights:
 
   // Compute live fusion score from real snapshot
   const liveFusionScore = useMemo(() => {
-    if (!snapshot) return 0.71;
+    if (!snapshot || snapshot.dataQuality.tickerStatus !== 'LIVE') return 0;
     try {
       const feat = featureEngine.calculateFeatures(snapshot);
       const { signals, regime } = specialistAgentSystem.evaluateAllAgents(snapshot, feat);
       const fusion = signalFusionEngine.fuseSignals(signals, regime);
-      return fusion.dominantAction === 'BUY' ? fusion.buyScore : fusion.dominantAction === 'SELL' ? 1 - fusion.sellScore : 0.5;
+      return fusion.dominantAction === 'BUY' ? fusion.buyScore : fusion.dominantAction === 'SELL' ? fusion.sellScore : 0.5;
     } catch {
-      return 0.68;
+      return 0;
     }
   }, [snapshot]);
 
@@ -305,7 +307,7 @@ agentWeights:
             const sym = b.symbol || 'BTCUSDT';
             const symPos = positions.find((p) => p.symbol === sym);
             const posStr = symPos ? `${symPos.side} ${sym.replace('USDT', '')}` : 'FLAT';
-            const livePrice = snapshot && snapshot.symbol === sym ? snapshot.price : Number(b.currentPrice || 64000);
+            const livePrice = snapshot && snapshot.symbol === sym ? snapshot.price : Number(b.currentPrice || 0);
             const pnl = Number(b.runningPnL || 0);
 
             return {
@@ -315,14 +317,14 @@ agentWeights:
               symbol: sym as SymbolId,
               iconType: idx % 4 === 0 ? 'bot' : idx % 4 === 1 ? 'zap' : idx % 4 === 2 ? 'trend' : 'brain',
               status: b.status === 'RUNNING' ? 'ACTIVE' : b.status === 'PAUSED' ? 'PAUSED' : 'PAPER',
-              allocation: `$ ${Number(b.allocatedCapital || 1000).toLocaleString()}`,
-              allocatedCapitalVal: Number(b.allocatedCapital || 1000),
+              allocation: `$ ${Number(b.allocatedCapital || 0).toLocaleString()}`,
+              allocatedCapitalVal: Number(b.allocatedCapital || 0),
               currentPosition: posStr,
               dailyPnL: `${pnl >= 0 ? '+' : '-'}$${Math.abs(pnl).toFixed(2)}`,
               dailyPnLVal: pnl,
-              totalReturn: `${pnl >= 0 ? '+' : ''}${((pnl / Math.max(1, Number(b.allocatedCapital || 1000))) * 100).toFixed(2)}%`,
-              winRateRR: b.winRate || '68% | 2.4:1',
-              sparkline: Array.isArray(b.sparkline) && b.sparkline.length > 0 ? b.sparkline : [100, 102, 105, 103, 108, 111],
+              totalReturn: `${pnl >= 0 ? '+' : ''}${((pnl / Math.max(1, Number(b.allocatedCapital || 0))) * 100).toFixed(2)}%`,
+              winRateRR: b.winRate || '—',
+              sparkline: Array.isArray(b.sparkline) ? b.sparkline : [],
               sparkColor: pnl >= 0 ? '#10B981' : '#EF4444',
               fusionScore: liveFusionScore,
               uptime: `${Math.floor((Date.now() - (b.startedAt || Date.now())) / 60000)}m`,
@@ -344,8 +346,9 @@ agentWeights:
       setIsSyncing(false);
     }
 
-    // Default fallback initialized with real portfolio values
-    if (strategies.length === 0) {
+    // An empty API response is a real empty state, not an invitation to invent bots.
+    setStrategies([]);
+    /*
       const eq = portfolio?.equity || 10000;
       setStrategies([
         {
@@ -424,7 +427,7 @@ agentWeights:
           logs: [],
         },
       ]);
-    }
+    */
   };
 
   useEffect(() => {
@@ -560,6 +563,20 @@ agentWeights:
     e.preventDefault();
     if (!editingBot) return;
     setStrategies((prev) => prev.map((s) => (s.id === editingBot.id ? editingBot : s)));
+    void fetch('/api/bot/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'UPDATE',
+        botId: editingBot.id,
+        updates: {
+          name: editingBot.name,
+          symbol: editingBot.symbol,
+          allocatedCapital: editingBot.allocatedCapitalVal,
+          cycleIntervalSeconds: editingBot.cycleIntervalSeconds,
+        },
+      }),
+    });
     setShowEditModal(false);
   };
 
@@ -583,7 +600,7 @@ agentWeights:
       dailyPnLVal: 0,
       totalReturn: '0.00%',
       winRateRR: '— | —',
-      sparkline: [100, 100],
+      sparkline: [],
       sparkColor: '#00D8F6',
       fusionScore: liveFusionScore,
       uptime: '1m',
@@ -608,7 +625,7 @@ agentWeights:
     setNewBotName('');
 
     try {
-      await fetch('/api/bot/state', {
+      const response = await fetch('/api/bot/state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -620,6 +637,15 @@ agentWeights:
             cycleIntervalSeconds: newBot.cycleIntervalSeconds,
           },
         }),
+      });
+      if (!response.ok) throw new Error('Bot creation was rejected by the server.');
+      onSpawnBot?.({
+        symbol: newBot.symbol,
+        allocatedCapital: newBot.allocatedCapitalVal,
+        cycleIntervalSeconds: newBot.cycleIntervalSeconds,
+        maxConsecutiveNoTrades: 5,
+        maxConsecutiveLosses: 3,
+        autoConfirmExit: true,
       });
     } catch {}
   };
@@ -670,7 +696,7 @@ agentWeights:
         dailyPnLVal: 0,
         totalReturn: '0.00%',
         winRateRR: '—',
-        sparkline: [100, 100],
+        sparkline: [],
         sparkColor: '#10B981',
         fusionScore: liveFusionScore,
         uptime: '1m',
@@ -692,9 +718,8 @@ agentWeights:
       setStrategies((prev) => [importedBot, ...prev]);
       setSelectedStrategyId(importedBot.id);
       setShowImportModal(false);
-      setActiveSection('my_strategies');
 
-      await fetch('/api/bot/state', {
+      const response = await fetch('/api/bot/state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -706,6 +731,15 @@ agentWeights:
             cycleIntervalSeconds: importedBot.cycleIntervalSeconds,
           },
         }),
+      });
+      if (!response.ok) throw new Error('Strategy import was rejected by the server.');
+      onSpawnBot?.({
+        symbol: importedBot.symbol,
+        allocatedCapital: importedBot.allocatedCapitalVal,
+        cycleIntervalSeconds: importedBot.cycleIntervalSeconds,
+        maxConsecutiveNoTrades: 5,
+        maxConsecutiveLosses: 3,
+        autoConfirmExit: true,
       });
     } catch (err: any) {
       setImportError(err.message || 'Invalid strategy format. Please check JSON / YAML syntax.');
@@ -750,34 +784,8 @@ agentWeights:
 
   return (
     <div className="flex flex-col xl:flex-row gap-4 min-h-[calc(100vh-8rem)]">
-      {/* Left Strategy Sidebar (Horizontal on mobile, vertical on desktop) */}
-      <StrategySidebar
-        activeSection={activeSection}
-        onSelectSection={(id) => {
-          if (id === 'settings') {
-            setShowGlobalSettingsModal(true);
-          } else {
-            setActiveSection(id);
-          }
-        }}
-        statusFilter={statusFilter}
-        onSelectStatusFilter={(filter) => {
-          setStatusFilter(filter);
-          if (activeSection !== 'overview' && activeSection !== 'my_strategies') {
-            setActiveSection('my_strategies');
-          }
-        }}
-        activeCount={activeBotsCount}
-        paperCount={paperBotsCount}
-        pausedCount={pausedBotsCount}
-        archivedCount={0}
-        onCreateStrategy={() => setShowCreateModal(true)}
-        onImportStrategy={() => setShowImportModal(true)}
-        onOpenSettings={() => setShowGlobalSettingsModal(true)}
-      />
-
       {/* Main Strategy Content Area */}
-      <div className="flex-1 space-y-4 min-w-0 pb-8">
+      <div className="w-full space-y-4 min-w-0 pb-8">
         {/* Header & Controls */}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -827,6 +835,24 @@ agentWeights:
           </div>
         </div>
 
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-gray-800/60">
+          {([
+            ['overview', 'My Strategies'],
+            ['marketplace', 'Strategy Catalog'],
+            ['portfolio', 'Allocation'],
+            ['reports', 'Reports'],
+            ['research', 'Research'],
+          ] as const).map(([section, label]) => (
+            <button
+              key={section}
+              onClick={() => setActiveSection(section)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${activeSection === section ? 'bg-cyan-600/20 text-cyan-400 border border-cyan-500/30' : 'text-gray-400 hover:text-white'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         {/* ── TOP 5 REAL-TIME KPI SUMMARY CARDS ── */}
         <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
           {/* 1. Total Active Capital */}
@@ -859,7 +885,7 @@ agentWeights:
               <div className="text-lg font-black text-white mt-1">{(liveFusionScore * 100).toFixed(0)}% Score</div>
             </div>
             <div className="w-16 h-8">
-              <Sparkline data={[1.6, 1.72, 1.8, 1.88, 1.95]} color="#10B981" height={28} />
+              <Sparkline data={portfolio?.equityCurve?.map((point) => point.equity) ?? []} color="#10B981" height={28} />
             </div>
           </div>
 
@@ -896,7 +922,7 @@ agentWeights:
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div>
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <span>97 Institutional Quant Strategies & Presets</span>
+                  <span>{catalogStrategies.length} Institutional Quant Strategies & Presets</span>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 font-bold border border-cyan-500/30">
                     Senpi Hyperliquid Ecosystem
                   </span>
@@ -926,7 +952,7 @@ agentWeights:
                     : 'bg-[#0B111E] text-gray-400 hover:text-white border border-gray-800'
                 }`}
               >
-                All Strategies ({catalogStrategies.length || 97})
+                All Strategies ({catalogStrategies.length})
               </button>
               {[
                 '1. Breakout & Core Majors',
@@ -1003,11 +1029,11 @@ agentWeights:
                             </div>
                             <div className="p-1.5 bg-[#080E1A] rounded border border-gray-800">
                               <span className="text-[9px] text-gray-500 block">Min Capital</span>
-                              <strong className="text-white">${strat.min_budget || 200}</strong>
+                              <strong className="text-white">{strat.min_budget ? `$${strat.min_budget}` : '—'}</strong>
                             </div>
                             <div className="p-1.5 bg-[#080E1A] rounded border border-gray-800">
                               <span className="text-[9px] text-gray-500 block">Max Lev</span>
-                              <strong className="text-amber-400">{strat.leverage_max || 5}x</strong>
+                              <strong className="text-amber-400">{strat.leverage_max ? `${strat.leverage_max}x` : '—'}</strong>
                             </div>
                           </div>
                         </div>
@@ -1030,8 +1056,15 @@ agentWeights:
                                 }),
                               });
                               if (res.ok) {
+                                onSpawnBot?.({
+                                  symbol: primarySymbol,
+                                  allocatedCapital: strat.min_budget ? strat.min_budget * 5 : 2000,
+                                  cycleIntervalSeconds: strat.cadence_seconds || 30,
+                                  maxConsecutiveNoTrades: 5,
+                                  maxConsecutiveLosses: 3,
+                                  autoConfirmExit: true,
+                                });
                                 fetchCloudBots();
-                                setActiveSection('overview');
                               }
                             } catch {}
                           }}
@@ -1058,13 +1091,13 @@ agentWeights:
                 <p className="text-xs text-gray-400">Live capital distribution across active quant strategies</p>
               </div>
               <span className="text-xs font-mono font-bold text-emerald-400">
-                Total Equity: ${(portfolio?.equity || 100000).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                Total Equity: ${(portfolio?.equity ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </span>
             </div>
 
             <div className="space-y-3">
               {strategies.map((strat) => {
-                const totalEq = portfolio?.equity || 100000;
+                const totalEq = portfolio?.equity ?? 0;
                 const pct = Math.round((strat.allocatedCapitalVal / Math.max(1, totalEq)) * 100);
                 return (
                   <div key={strat.id} className="p-3 bg-[#080E1A] rounded-xl border border-gray-800 space-y-2">
@@ -1148,7 +1181,7 @@ agentWeights:
         )}
 
         {/* ── PRIMARY VIEW: STRATEGY ROSTER TABLE (Overview / My Strategies) ── */}
-        {(activeSection === 'overview' || activeSection === 'my_strategies') && (
+        {activeSection === 'overview' && (
         <div className="bg-[#0B111E] p-4 rounded-xl border border-[#1E293B]">
           <div className="flex items-center justify-between mb-3">
             <div className="text-xs font-bold text-white tracking-wide uppercase">Active Strategy Roster ({filteredStrategies.length})</div>

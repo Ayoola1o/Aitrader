@@ -12,32 +12,15 @@ interface PortfolioEquityCurveProps {
   data?: PortfolioDataPoint[];
 }
 
-const DEFAULT_TIMELINE_DATA: PortfolioDataPoint[] = [
-  { date: "Jan '24", equity: 42000, benchmark: 40000 },
-  { date: "Feb '24", equity: 51000, benchmark: 47000 },
-  { date: "Mar '24", equity: 62000, benchmark: 59000 },
-  { date: "Apr '24", equity: 58000, benchmark: 54000 },
-  { date: "May '24", equity: 74000, benchmark: 66000 },
-  { date: "Jun '24", equity: 81000, benchmark: 63000 },
-  { date: "Jul '24", equity: 76000, benchmark: 67000 },
-  { date: "Aug '24", equity: 89000, benchmark: 61000 },
-  { date: "Sep '24", equity: 95000, benchmark: 64000 },
-  { date: "Oct '24", equity: 104000, benchmark: 71000 },
-  { date: "Nov '24", equity: 112000, benchmark: 88000 },
-  { date: "Dec '24", equity: 118000, benchmark: 96000 },
-  { date: "Jan '25", equity: 115000, benchmark: 94000 },
-  { date: "Feb '25", equity: 122000, benchmark: 99000 },
-  { date: "Mar '25", equity: 129000, benchmark: 105000 },
-  { date: "Apr '25", equity: 121000, benchmark: 98000 },
-  { date: "May '25", equity: 125340, benchmark: 108000 },
-];
-
 export const PortfolioEquityCurve: React.FC<PortfolioEquityCurveProps> = ({
-  data = DEFAULT_TIMELINE_DATA,
+  data = [],
 }) => {
   const [timeframe, setTimeframe] = useState<'7D' | '30D' | '90D' | '1Y' | 'ALL'>('ALL');
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const chartData = data.length > 0
+    ? data
+    : [{ date: 'Unavailable', equity: 0, benchmark: 0 }];
 
   const height = 220;
   const paddingLeft = 45;
@@ -57,10 +40,10 @@ export const PortfolioEquityCurve: React.FC<PortfolioEquityCurveProps> = ({
   const chartH = height - paddingTop - paddingBottom;
 
   const getY = (val: number) => paddingTop + (1 - (val - yMin) / yRange) * chartH;
-  const getX = (i: number) => paddingLeft + (i / (data.length - 1)) * chartW;
+  const getX = (i: number) => paddingLeft + (chartData.length > 1 ? (i / (chartData.length - 1)) * chartW : chartW / 2);
 
   // Equity Path
-  const points = data.map((d, i) => ({ x: getX(i), y: getY(d.equity) }));
+  const points = chartData.map((d, i) => ({ x: getX(i), y: getY(d.equity) }));
   let equityPathD = `M ${points[0].x} ${points[0].y}`;
   for (let i = 0; i < points.length - 1; i++) {
     const p0 = points[i];
@@ -71,7 +54,7 @@ export const PortfolioEquityCurve: React.FC<PortfolioEquityCurveProps> = ({
   const equityAreaD = `${equityPathD} L ${points[points.length - 1].x} ${height - paddingBottom} L ${points[0].x} ${height - paddingBottom} Z`;
 
   // Benchmark Path
-  const benchPoints = data.map((d, i) => ({ x: getX(i), y: getY(d.benchmark) }));
+  const benchPoints = chartData.map((d, i) => ({ x: getX(i), y: getY(d.benchmark) }));
   let benchPathD = `M ${benchPoints[0].x} ${benchPoints[0].y}`;
   for (let i = 0; i < benchPoints.length - 1; i++) {
     const p0 = benchPoints[i];
@@ -85,11 +68,11 @@ export const PortfolioEquityCurve: React.FC<PortfolioEquityCurveProps> = ({
     const rect = containerRef.current.getBoundingClientRect();
     const xPos = e.clientX - rect.left;
     const ratio = Math.max(0, Math.min(1, (xPos - paddingLeft) / (rect.width - paddingLeft - paddingRight)));
-    const idx = Math.round(ratio * (data.length - 1));
+    const idx = Math.round(ratio * (chartData.length - 1));
     setHoverIndex(idx);
   };
 
-  const activePoint = hoverIndex !== null ? data[hoverIndex] : null;
+  const activePoint = hoverIndex !== null ? chartData[hoverIndex] : null;
 
   return (
     <div className="flex flex-col h-full justify-between">
@@ -239,7 +222,7 @@ export const PortfolioEquityCurve: React.FC<PortfolioEquityCurveProps> = ({
           <div
             className="absolute top-2 pointer-events-none bg-[#0B111E]/95 border border-blue-500/40 rounded-lg p-2 text-xs shadow-xl backdrop-blur-md transition-all z-20"
             style={{
-              left: `${Math.min(80, Math.max(10, (hoverIndex / (data.length - 1)) * 100))}%`,
+              left: `${Math.min(80, Math.max(10, (hoverIndex / Math.max(1, chartData.length - 1)) * 100))}%`,
               transform: 'translateX(-50%)',
             }}
           >

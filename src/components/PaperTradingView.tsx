@@ -1,8 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import { PortfolioState, Position, TradeHistoryItem, Order } from '@/types/trading';
-import { PortfolioSidebar, PortfolioNavId } from '@/components/portfolio/PortfolioSidebar';
 import { PortfolioEquityCurve } from '@/components/portfolio/PortfolioEquityCurve';
 import { AssetAllocationDonut } from '@/components/portfolio/AssetAllocationDonut';
 import { RiskSpeedometer } from '@/components/portfolio/RiskSpeedometer';
@@ -21,7 +20,6 @@ interface PaperTradingViewProps {
   orders: Order[];
   onClosePosition: (id: string) => void;
   onCancelOrder?: (id: string) => void;
-  onNavigateSettings?: () => void;
 }
 
 export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
@@ -31,15 +29,12 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
   orders,
   onClosePosition,
   onCancelOrder,
-  onNavigateSettings,
 }) => {
-  const [activeSection, setActiveSection] = useState<PortfolioNavId>('overview');
-
   // Top Metrics (derived strictly from live broker state)
-  const totalEquity = portfolio?.equity ?? 100000;
+  const totalEquity = portfolio?.equity ?? 0;
   const dailyPnL = portfolio?.dailyPnL ?? 0;
   const dailyPnLPercent = portfolio?.equity ? (dailyPnL / portfolio.equity) * 100 : 0;
-  const initialBal = portfolio?.initialBalance || 100000;
+  const initialBal = portfolio?.initialBalance || 0;
   const totalReturnPercent = (((totalEquity - initialBal) / initialBal) * 100);
   const maxDrawdownPercent = portfolio?.maxDrawdownPercent ?? 0;
   const maxDrawdownDollars = (totalEquity * (maxDrawdownPercent / 100));
@@ -48,8 +43,19 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
   const winTrades = tradeHistory.filter((t) => (t.realizedPnL || 0) > 0);
   const winRate = totalTrades > 0 ? (winTrades.length / totalTrades) * 100 : 0;
   const profitFactor = portfolio?.profitFactor ?? 0;
-  const sharpeRatio = portfolio?.sharpeRatio ?? (totalTrades > 0 ? 1.85 : 0);
-  const sortinoRatio = totalTrades > 0 ? 2.45 : 0;
+  const sharpeRatio = portfolio?.sharpeRatio ?? 0;
+  const sortinoRatio = 0;
+  const equityCurve = portfolio?.equityCurve?.map((point) => ({
+    date: new Date(point.time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    equity: point.equity,
+    benchmark: point.equity,
+  })) ?? [];
+  const allocationAssets = positions.map((position, index) => ({
+    symbol: position.symbol,
+    percentage: totalEquity > 0 ? (position.size * position.currentPrice / totalEquity) * 100 : 0,
+    value: position.size * position.currentPrice,
+    color: ['#3B82F6', '#06B6D4', '#F59E0B', '#10B981'][index % 4],
+  }));
 
   const displayPositions = positions.map((p) => ({
     id: p.id,
@@ -96,9 +102,7 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
         balance: `$${totalEquity.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
         isPositive: (t.realizedPnL || 0) >= 0,
       }))
-    : [
-        { date: new Date().toISOString().split('T')[0], type: 'DEPOSIT', description: 'Initial Capital', amount: '+$100,000.00', balance: '$100,000.00', isPositive: true },
-      ];
+    : [];
 
   // Mini Radial Ring Component for Metrics 5-8
   const MetricRing = ({
@@ -140,20 +144,8 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
   };
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 min-h-[calc(100vh-8rem)]">
-      {/* Left Sub-Sidebar (Horizontal on mobile, vertical on desktop) */}
-      <PortfolioSidebar
-        activeSection={activeSection}
-        onSelectSection={setActiveSection}
-        buyingPower={portfolio?.freeMargin ?? 108430.2}
-        marginUsed={portfolio?.marginUsed ?? 16910.07}
-        marginFree={portfolio?.freeMargin ?? 91520.13}
-        leverage={2.15}
-        onOpenSettings={onNavigateSettings}
-      />
-
-      {/* Main Portfolio Content */}
-      <div className="flex-1 space-y-4 min-w-0 pb-8">
+    <div className="min-h-[calc(100vh-8rem)]">
+      <div className="space-y-4 min-w-0 pb-8">
         {/* Header Title */}
         <div>
           <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">Portfolio Overview</h2>
@@ -174,7 +166,7 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
               </div>
             </div>
             <div className="mt-1 h-6">
-              <Sparkline data={[120000, 121500, 122800, 124100, 123900, 125340]} color="#10B981" height={24} />
+              <Sparkline data={portfolio?.equityCurve?.map((point) => point.equity) ?? []} color="#10B981" height={24} />
             </div>
           </div>
 
@@ -190,7 +182,7 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
               </div>
             </div>
             <div className="mt-1 h-6">
-              <Sparkline data={[420, 680, 750, 990, 1150, 1245]} color="#10B981" height={24} />
+              <Sparkline data={tradeHistory.map((trade) => trade.realizedPnL || 0)} color="#10B981" height={24} />
             </div>
           </div>
 
@@ -202,7 +194,7 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
               <div className="text-[10px] text-gray-400 mt-0.5">All Time</div>
             </div>
             <div className="mt-1 h-6">
-              <Sparkline data={[12, 16, 19, 21, 23, 25.34]} color="#8B5CF6" height={24} />
+              <Sparkline data={portfolio?.equityCurve?.map((point) => ((point.equity - initialBal) / Math.max(1, initialBal)) * 100) ?? []} color="#8B5CF6" height={24} />
             </div>
           </div>
 
@@ -216,7 +208,7 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
               </div>
             </div>
             <div className="mt-1 h-6">
-              <Sparkline data={[1.5, 2.2, 2.8, 3.21, 2.9, 3.21]} color="#EF4444" height={24} />
+              <Sparkline data={portfolio?.equityCurve?.map((point) => point.equity) ?? []} color="#EF4444" height={24} />
             </div>
           </div>
 
@@ -272,10 +264,15 @@ export const PaperTradingView: React.FC<PaperTradingViewProps> = ({
         {/* ── ROW 2: EQUITY CURVE (60%) + ASSET ALLOCATION (40%) ── */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
           <div className="lg:col-span-7 bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] flex flex-col justify-between">
-            <PortfolioEquityCurve />
+            <PortfolioEquityCurve data={equityCurve} />
           </div>
           <div className="lg:col-span-5 bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] flex flex-col justify-between">
-            <AssetAllocationDonut totalValue={totalEquity} />
+            <AssetAllocationDonut
+              totalValue={totalEquity}
+              unallocatedCash={portfolio?.balance ?? 0}
+              unallocatedPercent={totalEquity > 0 ? ((portfolio?.balance ?? 0) / totalEquity) * 100 : 0}
+              assets={allocationAssets}
+            />
           </div>
         </div>
 

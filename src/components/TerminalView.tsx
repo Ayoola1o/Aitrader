@@ -120,57 +120,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   // Terminal Live Logs Stream
   const [logs, setLogs] = useState<
     { id: number; time: string; tag: string; message: string; color: string }[]
-  >([
-    {
-      id: 1,
-      time: '11:03:15',
-      tag: '[MARKET]',
-      message: 'BTCUSDT price update: 64250.18 (+0.06%)',
-      color: 'text-cyan-400',
-    },
-    {
-      id: 2,
-      time: '11:03:15',
-      tag: '[FEATURE]',
-      message: '128 features computed',
-      color: 'text-purple-400',
-    },
-    {
-      id: 3,
-      time: '11:03:15',
-      tag: '[AGENT]',
-      message: 'Agents updated successfully (8/8)',
-      color: 'text-blue-400',
-    },
-    {
-      id: 4,
-      time: '11:03:15',
-      tag: '[FUSION]',
-      message: 'Fusion score: 0.71 | Candidate: BUY',
-      color: 'text-emerald-400',
-    },
-    {
-      id: 5,
-      time: '11:03:15',
-      tag: '[LLM]',
-      message: 'Confidence: 81% | Reason generated',
-      color: 'text-yellow-400',
-    },
-    {
-      id: 6,
-      time: '11:03:15',
-      tag: '[RISK]',
-      message: 'All risk checks passed | Status: APPROVED',
-      color: 'text-emerald-400',
-    },
-    {
-      id: 7,
-      time: '11:03:15',
-      tag: '[BROKER]',
-      message: 'Order executed: BUY 0.03 BTCUSDT',
-      color: 'text-cyan-300',
-    },
-  ]);
+  >([]);
 
   // Cloud Bots State & Multi-Bot Switching
   const [cloudBots, setCloudBots] = useState<any[]>([]);
@@ -247,38 +197,39 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   }, [logs, autoScroll]);
 
   // Market Watch data (Reactively populated with live prices)
-  const currentBtc = snapshot?.symbol === 'BTCUSDT' ? snapshot.price : 64713;
-  const currentEth = snapshot?.symbol === 'ETHUSDT' ? snapshot.price : 1913.86;
-  const currentSol = snapshot?.symbol === 'SOLUSDT' ? snapshot.price : 77.11;
-  const currentXrp = snapshot?.symbol === 'XRPUSDT' ? snapshot.price : 1.001;
+  const liveTicker = snapshot?.dataQuality.tickerStatus === 'LIVE';
+  const currentBtc = snapshot?.symbol === 'BTCUSDT' && liveTicker ? snapshot.price : 0;
+  const currentEth = snapshot?.symbol === 'ETHUSDT' && liveTicker ? snapshot.price : 0;
+  const currentSol = snapshot?.symbol === 'SOLUSDT' && liveTicker ? snapshot.price : 0;
+  const currentXrp = snapshot?.symbol === 'XRPUSDT' && liveTicker ? snapshot.price : 0;
 
   const marketWatchData = [
     {
       symbol: 'BTCUSDT',
       price: currentBtc,
-      change24h: snapshot?.symbol === 'BTCUSDT' ? `${snapshot.change24h >= 0 ? '+' : ''}${snapshot.change24h}%` : '+1.32%',
-      vol: '$24.8B',
+      change24h: snapshot?.symbol === 'BTCUSDT' && liveTicker ? `${snapshot.change24h >= 0 ? '+' : ''}${snapshot.change24h}%` : '—',
+      vol: snapshot?.symbol === 'BTCUSDT' && liveTicker ? `$${(snapshot.volume24h / 1e9).toFixed(2)}B` : '—',
       isStar: true,
     },
     {
       symbol: 'ETHUSDT',
       price: currentEth,
-      change24h: snapshot?.symbol === 'ETHUSDT' ? `${snapshot.change24h >= 0 ? '+' : ''}${snapshot.change24h}%` : '+2.18%',
-      vol: '$12.6B',
+      change24h: snapshot?.symbol === 'ETHUSDT' && liveTicker ? `${snapshot.change24h >= 0 ? '+' : ''}${snapshot.change24h}%` : '—',
+      vol: snapshot?.symbol === 'ETHUSDT' && liveTicker ? `$${(snapshot.volume24h / 1e9).toFixed(2)}B` : '—',
       isStar: true,
     },
     {
       symbol: 'SOLUSDT',
       price: currentSol,
-      change24h: snapshot?.symbol === 'SOLUSDT' ? `${snapshot.change24h >= 0 ? '+' : ''}${snapshot.change24h}%` : '+3.21%',
-      vol: '$2.1B',
+      change24h: snapshot?.symbol === 'SOLUSDT' && liveTicker ? `${snapshot.change24h >= 0 ? '+' : ''}${snapshot.change24h}%` : '—',
+      vol: snapshot?.symbol === 'SOLUSDT' && liveTicker ? `$${(snapshot.volume24h / 1e9).toFixed(2)}B` : '—',
       isStar: true,
     },
     {
       symbol: 'XRPUSDT',
       price: currentXrp,
-      change24h: snapshot?.symbol === 'XRPUSDT' ? `${snapshot.change24h >= 0 ? '+' : ''}${snapshot.change24h}%` : '+0.87%',
-      vol: '$1.2B',
+      change24h: snapshot?.symbol === 'XRPUSDT' && liveTicker ? `${snapshot.change24h >= 0 ? '+' : ''}${snapshot.change24h}%` : '—',
+      vol: snapshot?.symbol === 'XRPUSDT' && liveTicker ? `$${(snapshot.volume24h / 1e9).toFixed(2)}B` : '—',
       isStar: false,
     },
   ];
@@ -296,16 +247,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
             ? 'text-rose-400'
             : 'text-yellow-400',
       }))
-    : [
-        { name: 'Regime Agent', bias: 'BULLISH', conf: '78%', color: 'text-emerald-400' },
-        { name: 'Technical Agent', bias: 'BULLISH', conf: '82%', color: 'text-emerald-400' },
-        { name: 'Liquidity Agent', bias: 'BULLISH', conf: '68%', color: 'text-emerald-400' },
-        { name: 'Positioning Agent', bias: 'BEARISH', conf: '61%', color: 'text-rose-400' },
-        { name: 'Momentum Agent', bias: 'BULLISH', conf: '76%', color: 'text-emerald-400' },
-        { name: 'Volatility Agent', bias: 'NEUTRAL', conf: '54%', color: 'text-yellow-400' },
-        { name: 'Macro/Sentiment Agent', bias: 'BULLISH', conf: '67%', color: 'text-emerald-400' },
-        { name: 'Execution Agent', bias: 'BULLISH', conf: '72%', color: 'text-emerald-400' },
-      ];
+    : [];
 
   // Live Order Book Data from Snapshot
   const orderBookAsks = snapshot?.orderBook?.asks?.length
@@ -313,26 +255,14 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         const sum = arr.slice(0, idx + 1).reduce((acc, curr) => acc + curr.size, 0);
         return { price: a.price, size: a.size, sum };
       })
-    : [
-        { price: (snapshot?.price || 64713) * 1.0005, size: 1.245, sum: 4.651 },
-        { price: (snapshot?.price || 64713) * 1.0004, size: 0.582, sum: 3.406 },
-        { price: (snapshot?.price || 64713) * 1.0003, size: 0.734, sum: 2.824 },
-        { price: (snapshot?.price || 64713) * 1.0002, size: 0.864, sum: 2.09 },
-        { price: (snapshot?.price || 64713) * 1.0001, size: 1.226, sum: 1.226 },
-      ];
+    : [];
 
   const orderBookBids = snapshot?.orderBook?.bids?.length
     ? snapshot.orderBook.bids.slice(0, 5).map((b, idx, arr) => {
         const sum = arr.slice(0, idx + 1).reduce((acc, curr) => acc + curr.size, 0);
         return { price: b.price, size: b.size, sum };
       })
-    : [
-        { price: (snapshot?.price || 64713) * 0.9999, size: 1.112, sum: 1.112 },
-        { price: (snapshot?.price || 64713) * 0.9998, size: 2.431, sum: 3.543 },
-        { price: (snapshot?.price || 64713) * 0.9997, size: 0.941, sum: 4.484 },
-        { price: (snapshot?.price || 64713) * 0.9996, size: 3.102, sum: 7.586 },
-        { price: (snapshot?.price || 64713) * 0.9995, size: 1.882, sum: 9.468 },
-      ];
+    : [];
 
   // Time & Sales Data from tradeHistory or live ticks
   interface TimeAndSaleTick {
@@ -349,11 +279,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         size: t.size,
         side: t.side === 'LONG' ? 'BUY' : 'SELL',
       }))
-    : [
-        { time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }), price: snapshot?.price || 64713, size: 0.421, side: 'BUY' },
-        { time: new Date(Date.now() - 2000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }), price: (snapshot?.price || 64713) - 0.5, size: 0.081, side: 'SELL' },
-        { time: new Date(Date.now() - 4000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }), price: (snapshot?.price || 64713) + 0.25, size: 1.124, side: 'BUY' },
-      ];
+    : [];
 
   const handleSpawnSubmit = (e: React.FormEvent) => {
     e.preventDefault();

@@ -8,6 +8,8 @@ import {
   RiskCheckResult,
   PortfolioState,
   AppMode,
+  Position,
+  TradeHistoryItem,
 } from '@/types/trading';
 import { Sparkline } from '@/components/dashboard/Sparkline';
 import { CircularGauge } from '@/components/dashboard/CircularGauge';
@@ -25,8 +27,6 @@ import {
   Sliders,
 } from 'lucide-react';
 
-import { paperBroker } from '@/lib/broker/paper';
-import { alpacaBrokerClient } from '@/lib/broker/alpaca';
 
 interface DashboardViewProps {
   snapshot: MarketSnapshot | null;
@@ -34,6 +34,8 @@ interface DashboardViewProps {
   decision: LLMDecision | null;
   riskCheck: RiskCheckResult | null;
   portfolio: PortfolioState | null;
+  positions: Position[];
+  tradeHistory: TradeHistoryItem[];
   appMode: AppMode;
   onExecuteTrade?: () => void;
   onNavigateSettings?: () => void;
@@ -47,18 +49,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   decision,
   riskCheck,
   portfolio,
+  positions,
+  tradeHistory,
   appMode,
   onNavigateTerminal,
   onNavigatePortfolio,
 }) => {
   const [marketTab, setMarketTab] = useState<'OVERVIEW' | 'FUTURES' | 'INDICES' | 'COMMODITIES'>('OVERVIEW');
 
-  const livePositions = paperBroker.getPositions();
-  const liveTrades = paperBroker.getTradeHistory();
+  const livePositions = positions;
+  const liveTrades = tradeHistory;
 
   // KPI Metrics (using live portfolio & live broker state)
-  const totalEquity = portfolio?.equity ?? (paperBroker.getPortfolioState(snapshot?.price || 64713).equity || 100000);
-  const dailyPnL = portfolio?.dailyPnL ?? (paperBroker.getPortfolioState(snapshot?.price || 64713).dailyPnL || 0);
+  const totalEquity = portfolio?.equity ?? 0;
+  const dailyPnL = portfolio?.dailyPnL ?? 0;
   const dailyPnLPercent = totalEquity > 0 ? (dailyPnL / totalEquity) * 100 : 0;
   const openPositionsCount = livePositions.length;
   const openPositionsExposure = livePositions.reduce((acc, p) => acc + (p.size * (p.currentPrice || p.entryPrice)), 0);
@@ -74,7 +78,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const maxDrawdown = portfolio?.maxDrawdownPercent ?? 0;
   const maxDrawdownDollars = (totalEquity * (maxDrawdown / 100));
-  const sharpeRatio = portfolio?.sharpeRatio ?? (totalTradesCount > 0 ? 1.85 : 0);
+  const sharpeRatio = portfolio?.sharpeRatio ?? 0;
   const return24h = dailyPnLPercent;
 
   // Expectancy and trade averages
@@ -107,16 +111,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   ];
 
   // Agent Performance List (Reactively derived from live signals)
-  const agentPerformanceList = [
-    { name: 'Regime Agent', icon: Compass, accuracy: signals.length > 0 ? 78.0 : 0, impact: '+0.42R', alignment: signals.find(s => s.agentName.includes('Regime'))?.confidence ? Math.round(signals.find(s => s.agentName.includes('Regime'))!.confidence * 100) : 78, positive: true },
-    { name: 'Technical Agent', icon: Cpu, accuracy: signals.length > 0 ? 82.0 : 0, impact: '+0.58R', alignment: signals.find(s => s.agentName.includes('Technical'))?.confidence ? Math.round(signals.find(s => s.agentName.includes('Technical'))!.confidence * 100) : 82, positive: true },
-    { name: 'Liquidity Agent', icon: Droplets, accuracy: signals.length > 0 ? 68.0 : 0, impact: '+0.31R', alignment: signals.find(s => s.agentName.includes('Liquidity') || s.agentName.includes('Order'))?.confidence ? Math.round(signals.find(s => s.agentName.includes('Liquidity') || s.agentName.includes('Order'))!.confidence * 100) : 68, positive: true },
-    { name: 'Positioning Agent', icon: Layers, accuracy: signals.length > 0 ? 61.0 : 0, impact: '-0.12R', alignment: 61, positive: false },
-    { name: 'Momentum Agent', icon: Zap, accuracy: signals.length > 0 ? 76.0 : 0, impact: '+0.39R', alignment: 76, positive: true },
-    { name: 'Volatility Agent', icon: Activity, accuracy: signals.length > 0 ? 54.0 : 0, impact: '-0.08R', alignment: signals.find(s => s.agentName.includes('Volatility'))?.confidence ? Math.round(signals.find(s => s.agentName.includes('Volatility'))!.confidence * 100) : 54, positive: false },
-    { name: 'Macro/Sentiment Agent', icon: Globe, accuracy: signals.length > 0 ? 67.0 : 0, impact: '+0.16R', alignment: 67, positive: true },
-    { name: 'Execution Agent', icon: Sliders, accuracy: signals.length > 0 ? 72.0 : 0, impact: '+0.28R', alignment: 72, positive: true },
-  ];
+  const agentDefinitions = [
+    ['Regime Agent', Compass], ['Technical Agent', Cpu], ['Liquidity Agent', Droplets],
+    ['Positioning Agent', Layers], ['Momentum Agent', Zap], ['Volatility Agent', Activity],
+    ['Macro/Sentiment Agent', Globe], ['Execution Agent', Sliders],
+  ] as const;
+  const agentPerformanceList = agentDefinitions.map(([name, icon]) => {
+    const signal = signals.find((item) => item.agentName.toLowerCase().includes(name.replace(' Agent', '').toLowerCase()));
+    const alignment = signal ? Math.round(signal.confidence * 100) : 0;
+    return {
+      name,
+      icon,
+      accuracy: alignment,
+      impact: '—',
+      alignment,
+      positive: signal ? signal.action === 'BUY' : false,
+    };
+  });
+
+  const equitySparkline = portfolio?.equityCurve?.map((point) => point.equity) ?? [];
 
   // Recent Trades List (Uses strictly real trade history from live broker)
   const recentTradesList = liveTrades.slice(-8).reverse().map((t) => {
@@ -140,47 +153,48 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   });
 
   // Market Overview List with live symbol data
-  const currentBtcPrice = snapshot?.symbol === 'BTCUSDT' ? snapshot.price : 64713;
-  const currentEthPrice = snapshot?.symbol === 'ETHUSDT' ? snapshot.price : 1913.86;
-  const currentSolPrice = snapshot?.symbol === 'SOLUSDT' ? snapshot.price : 77.11;
-  const currentXrpPrice = snapshot?.symbol === 'XRPUSDT' ? snapshot.price : 1.001;
+  const currentPrice = snapshot?.dataQuality.tickerStatus === 'LIVE' ? snapshot.price : 0;
+  const currentBtcPrice = snapshot?.symbol === 'BTCUSDT' ? currentPrice : 0;
+  const currentEthPrice = snapshot?.symbol === 'ETHUSDT' ? currentPrice : 0;
+  const currentSolPrice = snapshot?.symbol === 'SOLUSDT' ? currentPrice : 0;
+  const currentXrpPrice = snapshot?.symbol === 'XRPUSDT' ? currentPrice : 0;
 
   const marketList = [
     {
       symbol: 'BTCUSDT',
       price: currentBtcPrice,
-      change24h: snapshot?.symbol === 'BTCUSDT' ? snapshot.change24h : 1.32,
-      high24h: snapshot?.symbol === 'BTCUSDT' ? snapshot.high24h : currentBtcPrice * 1.015,
-      low24h: snapshot?.symbol === 'BTCUSDT' ? snapshot.low24h : currentBtcPrice * 0.985,
-      volume: '$24.8B',
-      sparkline: [currentBtcPrice * 0.988, currentBtcPrice * 0.992, currentBtcPrice * 0.998, currentBtcPrice * 0.995, currentBtcPrice * 1.005, currentBtcPrice],
+      change24h: snapshot?.symbol === 'BTCUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? snapshot.change24h : 0,
+      high24h: snapshot?.symbol === 'BTCUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? snapshot.high24h : 0,
+      low24h: snapshot?.symbol === 'BTCUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? snapshot.low24h : 0,
+      volume: snapshot?.symbol === 'BTCUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? `$${(snapshot.volume24h / 1e9).toFixed(2)}B` : '—',
+      sparkline: snapshot?.symbol === 'BTCUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? snapshot.candles.slice(-6).map((c) => c.close) : [],
     },
     {
       symbol: 'ETHUSDT',
       price: currentEthPrice,
-      change24h: snapshot?.symbol === 'ETHUSDT' ? snapshot.change24h : 2.18,
-      high24h: snapshot?.symbol === 'ETHUSDT' ? snapshot.high24h : currentEthPrice * 1.02,
-      low24h: snapshot?.symbol === 'ETHUSDT' ? snapshot.low24h : currentEthPrice * 0.98,
-      volume: '$12.6B',
-      sparkline: [currentEthPrice * 0.985, currentEthPrice * 0.99, currentEthPrice * 0.995, currentEthPrice * 1.002, currentEthPrice],
+      change24h: snapshot?.symbol === 'ETHUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? snapshot.change24h : 0,
+      high24h: snapshot?.symbol === 'ETHUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? snapshot.high24h : 0,
+      low24h: snapshot?.symbol === 'ETHUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? snapshot.low24h : 0,
+      volume: snapshot?.symbol === 'ETHUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? `$${(snapshot.volume24h / 1e9).toFixed(2)}B` : '—',
+      sparkline: snapshot?.symbol === 'ETHUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? snapshot.candles.slice(-6).map((c) => c.close) : [],
     },
     {
       symbol: 'SOLUSDT',
       price: currentSolPrice,
-      change24h: snapshot?.symbol === 'SOLUSDT' ? snapshot.change24h : 3.21,
-      high24h: snapshot?.symbol === 'SOLUSDT' ? snapshot.high24h : currentSolPrice * 1.03,
-      low24h: snapshot?.symbol === 'SOLUSDT' ? snapshot.low24h : currentSolPrice * 0.97,
-      volume: '$2.1B',
-      sparkline: [currentSolPrice * 0.97, currentSolPrice * 0.985, currentSolPrice * 0.995, currentSolPrice],
+      change24h: snapshot?.symbol === 'SOLUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? snapshot.change24h : 0,
+      high24h: snapshot?.symbol === 'SOLUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? snapshot.high24h : 0,
+      low24h: snapshot?.symbol === 'SOLUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? snapshot.low24h : 0,
+      volume: snapshot?.symbol === 'SOLUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? `$${(snapshot.volume24h / 1e9).toFixed(2)}B` : '—',
+      sparkline: snapshot?.symbol === 'SOLUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? snapshot.candles.slice(-6).map((c) => c.close) : [],
     },
     {
       symbol: 'XRPUSDT',
       price: currentXrpPrice,
-      change24h: snapshot?.symbol === 'XRPUSDT' ? snapshot.change24h : 0.87,
-      high24h: snapshot?.symbol === 'XRPUSDT' ? snapshot.high24h : currentXrpPrice * 1.02,
-      low24h: snapshot?.symbol === 'XRPUSDT' ? snapshot.low24h : currentXrpPrice * 0.98,
-      volume: '$1.2B',
-      sparkline: [currentXrpPrice * 0.98, currentXrpPrice * 0.99, currentXrpPrice * 0.995, currentXrpPrice],
+      change24h: snapshot?.symbol === 'XRPUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? snapshot.change24h : 0,
+      high24h: snapshot?.symbol === 'XRPUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? snapshot.high24h : 0,
+      low24h: snapshot?.symbol === 'XRPUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? snapshot.low24h : 0,
+      volume: snapshot?.symbol === 'XRPUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? `$${(snapshot.volume24h / 1e9).toFixed(2)}B` : '—',
+      sparkline: snapshot?.symbol === 'XRPUSDT' && snapshot.dataQuality.tickerStatus === 'LIVE' ? snapshot.candles.slice(-6).map((c) => c.close) : [],
     },
   ];
 
@@ -200,7 +214,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
           <div className="mt-1 h-6">
-            <Sparkline data={[121000, 122400, 121800, 123900, 124600, 125340]} color="#10B981" height={24} />
+            <Sparkline data={equitySparkline} color="#10B981" height={24} />
           </div>
         </div>
 
@@ -216,7 +230,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
           <div className="mt-1 h-6">
-            <Sparkline data={[400, 720, 650, 980, 1120, 1245]} color="#10B981" height={24} />
+            <Sparkline data={liveTrades.map((trade) => trade.realizedPnL || 0)} color="#10B981" height={24} />
           </div>
         </div>
 
@@ -230,7 +244,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
           <div className="mt-1 h-6">
-            <Sparkline data={[2, 3, 2, 4, 3, 3]} color="#38BDF8" height={24} />
+            <Sparkline data={livePositions.map((position) => position.size)} color="#38BDF8" height={24} />
           </div>
         </div>
 
@@ -242,7 +256,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="text-[10px] text-gray-400 mt-0.5">Total {totalTradesCount} trades</div>
           </div>
           <div className="mt-1 h-6">
-            <Sparkline data={[58, 60, 62, 61, 63, 64.8]} color="#8B5CF6" height={24} />
+            <Sparkline data={liveTrades.map((trade, index) => liveTrades.slice(0, index + 1).filter((item) => (item.realizedPnL || 0) > 0).length / (index + 1) * 100)} color="#8B5CF6" height={24} />
           </div>
         </div>
 
@@ -254,7 +268,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="text-[10px] font-semibold text-emerald-400 mt-0.5">Good</div>
           </div>
           <div className="mt-1 h-6">
-            <Sparkline data={[1.45, 1.52, 1.6, 1.58, 1.68, 1.72]} color="#10B981" height={24} />
+            <Sparkline data={liveTrades.map((trade, index) => {
+              const wins = liveTrades.slice(0, index + 1).filter((item) => (item.realizedPnL || 0) > 0).reduce((sum, item) => sum + (item.realizedPnL || 0), 0);
+              const losses = Math.abs(liveTrades.slice(0, index + 1).filter((item) => (item.realizedPnL || 0) < 0).reduce((sum, item) => sum + (item.realizedPnL || 0), 0));
+              return losses > 0 ? wins / losses : wins;
+            })} color="#10B981" height={24} />
           </div>
         </div>
 
@@ -268,7 +286,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
           <div className="mt-1 h-6">
-            <Sparkline data={[1.8, 2.4, 2.1, 3.0, 3.21, 2.8]} color="#EF4444" height={24} />
+            <Sparkline data={equitySparkline} color="#EF4444" height={24} />
           </div>
         </div>
 
@@ -280,7 +298,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="text-[10px] font-semibold text-emerald-400 mt-0.5">Good</div>
           </div>
           <div className="mt-1 h-6">
-            <Sparkline data={[1.55, 1.62, 1.7, 1.68, 1.78, 1.83]} color="#10B981" height={24} />
+            <Sparkline data={equitySparkline} color="#10B981" height={24} />
           </div>
         </div>
 
@@ -294,7 +312,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
           <div className="mt-1 h-6">
-            <Sparkline data={[0.2, 0.5, 0.4, 0.8, 0.95, 1.01]} color="#10B981" height={24} />
+            <Sparkline data={equitySparkline} color="#10B981" height={24} />
           </div>
         </div>
       </div>
@@ -303,7 +321,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
         {/* Equity Curve (col 1-6, ~50%) */}
         <div className="lg:col-span-6 bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] flex flex-col justify-between">
-          <EquityCurveChart initialEquity={totalEquity} />
+          <EquityCurveChart
+            data={portfolio?.equityCurve?.map((point) => ({
+              date: new Date(point.time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+              timestamp: point.time,
+              equity: point.equity,
+              benchmark: point.equity,
+            }))}
+            initialEquity={totalEquity}
+          />
         </div>
 
         {/* P&L Distribution (col 7-9, ~25%) */}
@@ -458,74 +484,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
         </div>
 
-        {/* Strategy Allocation (col 9-12, ~30%) */}
+        {/* Market Overview (col 9-12, ~30%) */}
         <div className="lg:col-span-4 bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] flex flex-col justify-between">
-          <div className="text-xs font-bold text-white tracking-wide uppercase mb-1">Strategy Allocation</div>
-          <div className="flex-1">
-            <DonutChart
-              totalAllocated={totalEquity}
-              totalUsed={openPositionsExposure}
-              available={Math.max(0, totalEquity - openPositionsExposure)}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* ── ROW 4: MARKET OVERVIEW + SYSTEM HEALTH + RECENT ALERTS ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-        {/* Market Overview (col 1-4, ~33%) */}
-        <div className="lg:col-span-4 bg-[#0B111E] p-4 rounded-xl border border-[#1E293B] flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold text-white tracking-wide uppercase">Market Overview</span>
-            <div className="flex gap-2 text-[10px] font-bold">
-              {(['OVERVIEW', 'FUTURES', 'INDICES', 'COMMODITIES'] as const).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setMarketTab(tab)}
-                  className={`transition-colors ${marketTab === tab ? 'text-cyan-400 border-b border-cyan-400' : 'text-gray-400 hover:text-gray-300'}`}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
-          </div>
-
+          <div className="text-xs font-bold text-white tracking-wide uppercase mb-1">Market Overview</div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="text-[10px] uppercase text-gray-400 border-b border-gray-800">
-                  <th className="pb-2 font-bold">Symbol</th>
-                  <th className="pb-2 font-bold text-right">Price</th>
-                  <th className="pb-2 font-bold text-right">24H %</th>
-                  <th className="pb-2 font-bold text-right">24H High</th>
-                  <th className="pb-2 font-bold text-right">24H Low</th>
-                  <th className="pb-2 font-bold text-right">Trend (7D)</th>
-                </tr>
-              </thead>
+              <thead><tr className="text-[10px] uppercase text-gray-400 border-b border-gray-800"><th className="pb-2">Symbol</th><th className="pb-2 text-right">Price</th><th className="pb-2 text-right">24H</th></tr></thead>
               <tbody className="divide-y divide-gray-800/40">
-                {marketList.map((m, i) => (
-                  <tr key={i} className="hover:bg-gray-800/30 transition-colors">
-                    <td className="py-2 font-bold text-white text-[11px]">{m.symbol}</td>
-                    <td className="py-2 text-right font-mono text-[11px] text-gray-200">
-                      {m.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
-                    </td>
-                    <td className="py-2 text-right text-[11px] font-bold text-emerald-400">
-                      +{m.change24h.toFixed(2)}%
-                    </td>
-                    <td className="py-2 text-right font-mono text-[10px] text-gray-400">
-                      {m.high24h.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td className="py-2 text-right font-mono text-[10px] text-gray-400">
-                      {m.low24h.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td className="py-2 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <span className="text-[10px] text-gray-400 font-mono">{m.volume}</span>
-                        <div className="w-10 h-4 inline-block">
-                          <Sparkline data={m.sparkline} color="#10B981" height={16} width={40} />
-                        </div>
-                      </div>
-                    </td>
+                {marketList.map((market) => (
+                  <tr key={market.symbol}>
+                    <td className="py-2 font-bold text-white text-[11px]">{market.symbol}</td>
+                    <td className="py-2 text-right font-mono text-[11px] text-gray-200">{market.price > 0 ? market.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : '—'}</td>
+                    <td className="py-2 text-right text-[11px] font-bold text-gray-400">{market.price > 0 ? `${market.change24h >= 0 ? '+' : ''}${market.change24h.toFixed(2)}%` : '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -552,50 +522,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           <div className="space-y-2 text-xs">
-            {/* Alert 1 */}
-            <div className="flex items-start justify-between gap-2 p-2 rounded-lg bg-gray-900/40 border border-gray-800/60">
-              <div className="flex items-start gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shadow-sm shadow-emerald-400/50" />
+            {recentTradesList.length === 0 ? (
+              <div className="text-[11px] text-gray-500 py-4">No broker activity available.</div>
+            ) : recentTradesList.slice(0, 3).map((trade) => (
+              <div key={`${trade.time}-${trade.symbol}`} className="flex items-start justify-between gap-2 p-2 rounded-lg bg-gray-900/40 border border-gray-800/60">
                 <div>
-                  <div className="text-[10px] text-gray-400 font-mono">11:03:12</div>
-                  <div className="text-[11px] font-semibold text-white">Trade Executed: BTCUSDT Long 0.03</div>
-                  <div className="text-[10px] text-gray-400">Filled @ 64,250.18</div>
+                  <div className="text-[10px] text-gray-400 font-mono">{trade.time}</div>
+                  <div className="text-[11px] font-semibold text-white">{trade.side} {trade.symbol}</div>
+                  <div className="text-[10px] text-gray-400">{trade.pnl}</div>
                 </div>
+                <span className="text-[9px] px-1.5 py-0.5 rounded font-black bg-blue-500/20 text-cyan-400 border border-blue-500/30 uppercase">FILL</span>
               </div>
-              <span className="text-[9px] px-1.5 py-0.5 rounded font-black bg-blue-500/20 text-cyan-400 border border-blue-500/30 uppercase">
-                INFO
-              </span>
-            </div>
-
-            {/* Alert 2 */}
-            <div className="flex items-start justify-between gap-2 p-2 rounded-lg bg-gray-900/40 border border-gray-800/60">
-              <div className="flex items-start gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shadow-sm shadow-amber-400/50" />
-                <div>
-                  <div className="text-[10px] text-gray-400 font-mono">10:47:01</div>
-                  <div className="text-[11px] font-semibold text-white">High Volatility Detected</div>
-                  <div className="text-[10px] text-gray-400">BTCUSDT 1m volatility 72% percentile</div>
-                </div>
-              </div>
-              <span className="text-[9px] px-1.5 py-0.5 rounded font-black bg-amber-500/20 text-amber-400 border border-amber-500/30 uppercase">
-                WARNING
-              </span>
-            </div>
-
-            {/* Alert 3 */}
-            <div className="flex items-start justify-between gap-2 p-2 rounded-lg bg-gray-900/40 border border-gray-800/60">
-              <div className="flex items-start gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shadow-sm shadow-emerald-400/50" />
-                <div>
-                  <div className="text-[10px] text-gray-400 font-mono">10:15:32</div>
-                  <div className="text-[11px] font-semibold text-white">Risk Check Passed</div>
-                  <div className="text-[10px] text-gray-400">All risk parameters within limits</div>
-                </div>
-              </div>
-              <span className="text-[9px] px-1.5 py-0.5 rounded font-black bg-blue-500/20 text-cyan-400 border border-blue-500/30 uppercase">
-                INFO
-              </span>
-            </div>
+            ))}
           </div>
         </div>
       </div>
